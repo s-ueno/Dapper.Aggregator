@@ -8,9 +8,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyTitle("Dapper.Aggregater")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("IIYAMA PC")]
 [assembly: AssemblyProduct("Dapper.Aggregater")]
-[assembly: AssemblyCopyright("Copyright © IIYAMA PC 2015")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 
