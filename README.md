@@ -1,8 +1,8 @@
 # Dapper.Aggregater
-tried to add a DataRelation to Dapper
+tried to add a entity-relationship to Dapper
 
 
-you can get a defined entity relation using "QueryWith" method.
+you can get a defined entity-relationship using "QueryWith" method.
 I improve Criteria Pattern a little more and consider that I can easily make Sql.
 
 
