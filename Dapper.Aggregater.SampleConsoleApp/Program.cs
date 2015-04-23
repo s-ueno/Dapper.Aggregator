@@ -19,6 +19,10 @@ namespace Dapper.Aggregater.SampleConsoleApp
             var sqlMapper = helper.DbConnection;
             var rows = sqlMapper.QueryWith<EventAggregate>(@"select * from EventTable");
 
+
+
+
+
             foreach (var row in rows)
             {
                 Trace.TraceInformation(string.Format("EventTable.EventTableID => {0} EventTitle => {1}", row.EventTableID, row.EventTitle));
