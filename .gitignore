@@ -1,2 +1,6 @@
 Dapper.Aggregater.v12.suo
 *.pdb
+*.dll
+*.xml
+*.cache
+*.txt
