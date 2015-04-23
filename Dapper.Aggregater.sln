@@ -9,7 +9,19 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ExternalFiles", "ExternalFi
 	ProjectSection(SolutionItems) = preProject
 		ExternalFiles\Dapper.Contrib.dll = ExternalFiles\Dapper.Contrib.dll
 		ExternalFiles\Dapper.dll = ExternalFiles\Dapper.dll
+		ExternalFiles\SampleDB.sdf = ExternalFiles\SampleDB.sdf
+		ExternalFiles\sqlceca40.dll = ExternalFiles\sqlceca40.dll
+		ExternalFiles\sqlcecompact40.dll = ExternalFiles\sqlcecompact40.dll
+		ExternalFiles\sqlceer40EN.dll = ExternalFiles\sqlceer40EN.dll
+		ExternalFiles\sqlceer40JA.dll = ExternalFiles\sqlceer40JA.dll
+		ExternalFiles\sqlceme40.dll = ExternalFiles\sqlceme40.dll
+		ExternalFiles\sqlceoledb40.dll = ExternalFiles\sqlceoledb40.dll
+		ExternalFiles\sqlceqp40.dll = ExternalFiles\sqlceqp40.dll
+		ExternalFiles\sqlcese40.dll = ExternalFiles\sqlcese40.dll
+		ExternalFiles\System.Data.SqlServerCe.dll = ExternalFiles\System.Data.SqlServerCe.dll
 	EndProjectSection
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregater.SampleConsoleApp", "Dapper.Aggregater.SampleConsoleApp\Dapper.Aggregater.SampleConsoleApp.csproj", "{B6FAF935-AF52-423C-A86E-4619DBA862F6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -21,6 +33,10 @@ Global
 		{E5CE9B74-C868-429A-840E-4F60D461F118}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E5CE9B74-C868-429A-840E-4F60D461F118}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E5CE9B74-C868-429A-840E-4F60D461F118}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B6FAF935-AF52-423C-A86E-4619DBA862F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B6FAF935-AF52-423C-A86E-4619DBA862F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B6FAF935-AF52-423C-A86E-4619DBA862F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B6FAF935-AF52-423C-A86E-4619DBA862F6}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
