@@ -1,5 +1,6 @@
 # Dapper.Aggregater
-tried to add a entity-relationship to Dapper
+
+I'm trying to add a entity-relationship to Dapper
 
 
 you can get a defined entity-relationship using "QueryWith" method.
@@ -52,3 +53,5 @@ foreach (var row in rows)
 ```
 
 
+I am interested in using Dapper.
+I want to try to challenge myself to various things.
