@@ -23,7 +23,7 @@ Definition
             {
                 if (_details == null)
                 {
-                    _details = (this as IContainerHolder).Container.GetChildren<EventDetailsTable>();
+                    _details = (this as IContainerHolder).Container.GetChildren<EventDetailsTable>().ToArray();
                 }
                 return _details;
             }
