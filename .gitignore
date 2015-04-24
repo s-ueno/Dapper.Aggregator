@@ -4,3 +4,6 @@ Dapper.Aggregater.v12.suo
 *.xml
 *.cache
 *.txt
+*.exe
+Dapper.Aggregater.SampleConsoleApp/bin/Debug/Dapper.Aggregater.SampleConsoleApp.exe.config
+Dapper.Aggregater.SampleConsoleApp/bin/Debug/Dapper.Aggregater.SampleConsoleApp.vshost.exe.config

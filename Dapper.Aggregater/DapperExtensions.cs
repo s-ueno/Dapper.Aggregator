@@ -400,7 +400,7 @@ namespace Dapper.Aggregater
         protected object Current { get; private set; }
         protected RelationAttribute[] Atts { get; private set; }
         protected DataStore DataStore { get; private set; }
-        public T[] GetChildren<T>(string key = null)
+        public IEnumerable<T> GetChildren<T>(string key = null)
         {
             var t = typeof(T);
             RelationAttribute att;
@@ -419,7 +419,7 @@ namespace Dapper.Aggregater
                 key = att.Key;
             }
             var rows = DataStore.Find(Current, key, att);
-            return rows.Cast<T>().ToArray();
+            return rows.Cast<T>();
         }
     }
 
