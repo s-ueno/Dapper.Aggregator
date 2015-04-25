@@ -1,5 +1,6 @@
 # Dapper.Aggregater
-tried to add a entity-relationship to Dapper
+
+I'm trying to add a entity-relationship to Dapper
 
 
 you can get a defined entity-relationship using "QueryWith" method.
@@ -22,7 +23,7 @@ Definition
             {
                 if (_details == null)
                 {
-                    _details = (this as IContainerHolder).Container.GetChildren<EventDetailsTable>();
+                    _details = (this as IContainerHolder).Container.GetChildren<EventDetailsTable>().ToArray();
                 }
                 return _details;
             }
@@ -52,3 +53,5 @@ foreach (var row in rows)
 ```
 
 
+I am interested in using Dapper.
+I want to try to challenge myself to various things.
