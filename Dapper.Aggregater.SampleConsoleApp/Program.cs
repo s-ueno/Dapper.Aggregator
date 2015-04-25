@@ -25,11 +25,19 @@ namespace Dapper.Aggregater.SampleConsoleApp
             query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
             query.Join<EventDetailsTable, CodeTable>("CodeTableID", "CodeTableCD");
 
-            //query.Sql = "select * from EventTable where EventTableID = @p1";
-            //query.Parameters = new { p1 = 1 };
+            query.Filter = query.Eq(x => x.EventTableID, 0) |
+                           query.NotEq(x => x.EventTableID, 1) &
+                           query.Between(x => x.EventTime, DateTime.Now.AddYears(-10), DateTime.Now.AddYears(10)) &
+                           query.In(x => x.EventTableID, 0, 10000) &
+                           !query.Like(x => x.EventTitle, "AAAAA", LikeCriteria.Match.Start) |
+                           query.LessThan(x => x.EventTableID, 100) &
+                           query.IsNotNull(x => x.EventTableID);
+
+            //debug statement
+            Trace.TraceInformation(query.Filter.BuildStatement());
+            Trace.TraceInformation(query.Sql);
 
             var rows = sqlMapper.QueryWith(query);
-
             foreach (var row in rows)
             {
                 foreach (var each in (row as IContainerHolder).Container.GetChildren<EventDetailsTable>())

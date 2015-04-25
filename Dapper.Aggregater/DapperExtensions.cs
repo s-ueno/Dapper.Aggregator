@@ -24,7 +24,8 @@ namespace Dapper.Aggregater
                 each.EnsureDynamicType();
                 each.DataAdapter.SplitCount = splitLength;
             }
-            var newParentType = ILGeneratorUtil.InjectionInterfaceWithProperty(typeof(T));
+
+            var newParentType = query.Relations.Any() ? ILGeneratorUtil.InjectionInterfaceWithProperty(typeof(T)) : typeof(T);
 
             var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout, commandType);
             if (rows == null || !rows.Any()) return new T[] { };
@@ -144,7 +145,20 @@ namespace Dapper.Aggregater
             return name;
         }
         static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
+        internal static string ToSymbol(this Expression expr)
+        {
+            if (expr == null)
+                return null;
 
+            var memExp = (expr as LambdaExpression).Body as MemberExpression;
+            var list = new List<string>();
+            while (memExp is MemberExpression)
+            {
+                list.Add(memExp.Member.Name);
+                memExp = memExp.Expression as MemberExpression;
+            }
+            return string.Join(".", list.Reverse<string>());
+        }
     }
 
 
@@ -211,10 +225,78 @@ namespace Dapper.Aggregater
         {
             RootType = typeof(Root);
         }
+
+        public Criteria Eq<P>(Expression<Func<Root, P>> property, P obj)
+        {
+            return new IdCriteria(obj, property.ToSymbol(), ++CriteriaIndex);
+        }
+        public Criteria NotEq<P>(Expression<Func<Root, P>> property, P obj)
+        {
+            return new NotCriteria(new IdCriteria(obj, property.ToSymbol(), ++CriteriaIndex));
+        }
+        public Criteria Between<P>(Expression<Func<Root, P>> property, P start, P end)
+        {
+            return new BetweenCriteria(property.ToSymbol(), start, end, ++CriteriaIndex);
+        }
+        public Criteria In<P>(Expression<Func<Root, P>> property, params P[] args)
+        {
+            return new InCriteria(property.ToSymbol(), args.Cast<object>().ToList(), ++CriteriaIndex);
+        }
+        public Criteria Expression(string statemant, Dictionary<string, object> parameters = null)
+        {
+            return new ExpressionCriteria(statemant, parameters);
+        }
+        public Criteria Like<P>(Expression<Func<Root, P>> property, object obj, LikeCriteria.Match asterisk)
+        {
+            return new LikeCriteria(property.ToSymbol(), obj, asterisk, ++CriteriaIndex);
+        }
+
+        /// <summary>
+        /// Property &gt; Value
+        /// </summary>
+        public Criteria GreaterThan<P>(Expression<Func<Root, P>> property, P obj)
+        {
+            return new ComparisonCriteria(property.ToSymbol(), obj,
+                ComparisonCriteria.Comparison.GreaterThan, ComparisonCriteria.Eq.Ignore, ++CriteriaIndex);
+        }
+        /// <summary>
+        /// Property ≧ Value
+        /// </summary>
+        public Criteria GreaterThanEq<P>(Expression<Func<Root, P>> property, P obj)
+        {
+            return new ComparisonCriteria(property.ToSymbol(), obj,
+                ComparisonCriteria.Comparison.GreaterThan, ComparisonCriteria.Eq.Contains, ++CriteriaIndex);
+        }
+        /// <summary>
+        /// Property &lt; Value
+        /// </summary>
+        public Criteria LessThan<P>(Expression<Func<Root, P>> property, P obj)
+        {
+            return new ComparisonCriteria(property.ToSymbol(), obj,
+                ComparisonCriteria.Comparison.LessThan, ComparisonCriteria.Eq.Ignore, ++CriteriaIndex);
+        }
+        /// <summary>
+        /// Property ≦ Value
+        /// </summary>
+        public Criteria LessThanEq<P>(Expression<Func<Root, P>> property, P obj)
+        {
+            return new ComparisonCriteria(property.ToSymbol(), obj,
+                ComparisonCriteria.Comparison.LessThan, ComparisonCriteria.Eq.Contains, ++CriteriaIndex);
+        }
+        public Criteria IsNull<P>(Expression<Func<Root, P>> property)
+        {
+            return new ExpressionCriteria(string.Format(" {0} IS NULL ", property.ToSymbol()));
+        }
+        public Criteria IsNotNull<P>(Expression<Func<Root, P>> property)
+        {
+            return new ExpressionCriteria(string.Format(" {0} IS NOT NULL ", property.ToSymbol()));
+        }
     }
 
     public abstract class QueryImp
     {
+        internal int CriteriaIndex { get; set; }
+
         public QueryImp()
         {
             Relations = new List<RelationAttribute>();
@@ -225,18 +307,15 @@ namespace Dapper.Aggregater
         {
             get
             {
-                if (string.IsNullOrWhiteSpace(_sql))
+                if (Filter == null)
                 {
-                    _sql = string.Format("select * from {0} ", RootType.GetTableName());
+                    return string.Format("select * from {0} ", RootType.GetTableName());
                 }
-                return _sql;
+                return string.Format("select * from {0} where {1} ", RootType.GetTableName(), Filter.BuildStatement());
             }
-            set { _sql = value; }
         }
-        private string _sql;
-        public object Parameters { get; set; }
-
-
+        internal object Parameters { get { return Filter == null ? null : Filter.BuildParameters(); } }
+        public Criteria Filter { get; set; }
         public QueryImp Join<Parent, Child>(string parentPropertyName, string childPropertyName)
         {
             Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), parentPropertyName, childPropertyName));
@@ -257,6 +336,8 @@ namespace Dapper.Aggregater
             Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), key, parentPropertyNames, childPropertyNames));
             return this;
         }
+
+
     }
 
 
@@ -613,6 +694,10 @@ namespace Dapper.Aggregater
         {
             return new OperatorCriteria("OR", c1, c2);
         }
+        public static Criteria operator !(Criteria c)
+        {
+            return new NotCriteria(c);
+        }
     }
 
     public class OperatorCriteria : Criteria, IEquatable<OperatorCriteria>
@@ -725,6 +810,175 @@ namespace Dapper.Aggregater
             return Value.Equals(other.Value) && Name == other.Name;
         }
     }
+    public class NotCriteria : Criteria
+    {
+        Criteria c;
+        public NotCriteria(Criteria c)
+        {
+            this.c = c;
+        }
+        public override string BuildStatement()
+        {
+            return string.Format(" NOT ({0})", c.BuildStatement());
+        }
+        public override Dictionary<string, object> BuildParameters()
+        {
+            return c.BuildParameters();
+        }
+    }
+
+    public class BetweenCriteria : Criteria
+    {
+        public string Name { get; private set; }
+        public object Start { get; private set; }
+        public object End { get; private set; }
+        public int Index { get; private set; }
+        public BetweenCriteria(string name, object start, object end, int index = 0)
+        {
+            this.Name = name;
+            this.Start = start;
+            this.End = end;
+            this.Index = index;
+        }
+        public override string BuildStatement()
+        {
+            return string.Format(" {0} BETWEEN @startP{1} AND @endP{1}", Name, Index);
+        }
+        public override Dictionary<string, object> BuildParameters()
+        {
+            var dic = new Dictionary<string, object>();
+            dic[string.Format("@startP{0}", Index)] = Start;
+            dic[string.Format("@endP{0}", Index)] = End;
+            return dic;
+        }
+    }
+
+    public class ExpressionCriteria : Criteria
+    {
+        public string Statemant { get; private set; }
+        public Dictionary<string, object> Parameters { get; private set; }
+        public ExpressionCriteria(string statemant, Dictionary<string, object> parameters = null)
+        {
+            Statemant = statemant;
+            Parameters = parameters;
+        }
+        public override string BuildStatement()
+        {
+            return Statemant;
+        }
+        public override Dictionary<string, object> BuildParameters()
+        {
+            return Parameters ?? new Dictionary<string, object>();
+        }
+    }
+
+    public class LikeCriteria : Criteria
+    {
+        public enum Match
+        {
+            Start,
+            End,
+            Match
+        }
+
+
+        public string Name { get; private set; }
+        public object Value { get; private set; }
+        public Match Mat { get; private set; }
+        public int Index { get; private set; }
+        public LikeCriteria(string name, object value, Match match, int index = 0)
+        {
+            this.Name = name;
+            this.Value = value;
+            this.Mat = match;
+            this.Index = index;
+        }
+        public override string BuildStatement()
+        {
+            return string.Format(" {0} LIKE @p{1}", Name, Index);
+        }
+        public override Dictionary<string, object> BuildParameters()
+        {
+            var dic = new Dictionary<string, object>();
+            dic[string.Format("@p{0}", Index)] =
+                string.Format("{0}{1}{2}", Mat == Match.End ? string.Empty : "%", Value, Mat == Match.Start ? string.Empty : "%");
+            return dic;
+        }
+
+        private static string Escape(string s)
+        {
+            return s.Replace("%", "[%]").Replace("[", "[[]").Replace("]", "[]]");
+        }
+
+    }
+
+    public class ComparisonCriteria : Criteria
+    {
+        public enum Eq
+        {
+            Contains,
+            Ignore
+        }
+        public enum Comparison
+        {
+            /// <summary>
+            /// Property &gt; Value
+            /// </summary>
+            GreaterThan,
+            /// <summary>
+            /// Property &lt; Value
+            /// </summary>
+            LessThan
+        }
+
+        public string Name { get; private set; }
+        public object Value { get; private set; }
+        public Comparison Comp { get; private set; }
+        public Eq EqStatus { get; private set; }
+        public int Index { get; private set; }
+        public ComparisonCriteria(string name, object value, Comparison comparison, Eq eq, int index = 0)
+        {
+            Name = name;
+            Value = value;
+            Comp = comparison;
+            EqStatus = eq;
+            Index = index;
+        }
+        public override string BuildStatement()
+        {
+            return string.Format(" {0} {1}{2} @p{3}", Name, Comp == Comparison.GreaterThan ? ">" : "<", EqStatus == Eq.Contains ? "=" : string.Empty, Index);
+        }
+        public override Dictionary<string, object> BuildParameters()
+        {
+            var dic = new Dictionary<string, object>();
+            dic[string.Format("@p{0}", Index)] = Value;
+            return dic;
+        }
+    }
+
+
+    public class InCriteria : Criteria
+    {
+        public string Name { get; private set; }
+        public List<object> InList { get; private set; }
+        public int Index { get; private set; }
+        public InCriteria(string name, List<object> inList, int index = 0)
+        {
+            Name = name;
+            InList = inList;
+            Index = index;
+        }
+        public override string BuildStatement()
+        {
+            return string.Format(" {0} IN @p{1}", Name, Index);
+        }
+        public override Dictionary<string, object> BuildParameters()
+        {
+            var dic = new Dictionary<string, object>();
+            dic[string.Format("@p{0}", Index)] = InList;
+            return dic;
+        }
+    }
 
     public static class CriteriaExtensionMethods
     {
@@ -735,6 +989,10 @@ namespace Dapper.Aggregater
         public static Criteria Or(this Criteria criteria, Criteria otherCriteria)
         {
             return new OperatorCriteria("OR", criteria, otherCriteria);
+        }
+        public static Criteria Not(this Criteria criteria)
+        {
+            return new NotCriteria(criteria);
         }
     }
 

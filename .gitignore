@@ -7,3 +7,5 @@ Dapper.Aggregater.v12.suo
 *.exe
 Dapper.Aggregater.SampleConsoleApp/bin/Debug/Dapper.Aggregater.SampleConsoleApp.exe.config
 Dapper.Aggregater.SampleConsoleApp/bin/Debug/Dapper.Aggregater.SampleConsoleApp.vshost.exe.config
+Dapper.Aggregater/DapperExtensions.cs~RF217514e3.TMP
+Dapper.Aggregater.SampleConsoleApp/bin/Debug/Dapper.Aggregater.SampleConsoleApp.vshost.exe.manifest
