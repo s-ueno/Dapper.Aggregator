@@ -4,13 +4,50 @@ using System.Collections.Generic;
 using System.Data;
 using System.Diagnostics;
 using System.Linq;
+using System.Linq.Expressions;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Text;
 
 namespace Dapper.Aggregater
 {
     public static class DapperExtensions
     {
+        //poco pattern
+        // dynamic type. Class cannot step over AppDomain because this use TypeBuilder.
+        public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, Query<T> query,
+            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 300)
+        {
+            foreach (var each in query.Relations)
+            {
+                each.Ensure();
+                each.EnsureDynamicType();
+                each.DataAdapter.SplitCount = splitLength;
+            }
+            var newParentType = ILGeneratorUtil.InjectionInterfaceWithProperty(typeof(T));
+
+            var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout, commandType);
+            if (rows == null || !rows.Any()) return new T[] { };
+
+            var rootRecordCount = 0;
+            var list = rows as ICollection<object>;
+            if (list != null)
+            {
+                rootRecordCount = list.Count;
+            }
+            else
+            {
+                rootRecordCount = rows.Count();
+            }
+
+            var command = new CommandDefinition(null, null, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
+            LoadWith(cnn, command, newParentType, query.Relations.ToArray(), rows);
+            return rows.Cast<T>();
+        }
+
+
+        //Implement IContainerHolder Interface pattern
+        // all typesafe.
         public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, string sql, object param = null,
             IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 300) where T : IContainerHolder
         {
@@ -56,6 +93,8 @@ namespace Dapper.Aggregater
             if (!rootAtts.Any()) return;
 
             var rootDataStore = new DataStore();
+
+
             var enumerator = roots.GetEnumerator();
             var hasValue = enumerator.MoveNext();
             while (hasValue)
@@ -84,11 +123,151 @@ namespace Dapper.Aggregater
                 }
             }
         }
+
+
+        //Dapper.Contrib
+        internal static string GetTableName(this Type type)
+        {
+            string name;
+            if (!TypeTableName.TryGetValue(type.TypeHandle, out name))
+            {
+                name = type.Name;
+                if (type.IsInterface && name.StartsWith("I"))
+                    name = name.Substring(1);
+
+                //NOTE: This as dynamic trick should be able to handle both our own Table-attribute as well as the one in EntityFramework 
+                var tableattr = type.GetCustomAttributes(false).Where(attr => attr.GetType().Name == "TableAttribute").SingleOrDefault() as dynamic;
+                if (tableattr != null)
+                    name = tableattr.Name;
+                TypeTableName[type.TypeHandle] = name;
+            }
+            return name;
+        }
+        static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
+
     }
+
+
+    internal static class ILGeneratorUtil
+    {
+        private static readonly ConcurrentDictionary<Type, Type> TypeCache = new ConcurrentDictionary<Type, Type>();
+        static ILGeneratorUtil()
+        {
+            var assemblyName = new AssemblyName(Guid.NewGuid().ToString());
+            dynamicAssemblyBuilder = System.Threading.Thread.GetDomain().DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
+        }
+        private static readonly AssemblyBuilder dynamicAssemblyBuilder;
+
+        public static Type InjectionInterfaceWithProperty(Type targetType)
+        {
+            Type buildType;
+            if (TypeCache.TryGetValue(targetType, out buildType))
+            {
+                return buildType;
+            }
+
+            var moduleBuilder = dynamicAssemblyBuilder.DefineDynamicModule("ILGeneratorUtil." + targetType.Name);
+            var typeBuilder = moduleBuilder.DefineType(targetType.Name + "_" + Guid.NewGuid(), TypeAttributes.Public | TypeAttributes.Class, targetType);
+
+            var interfaceType = typeof(IContainerHolder);
+
+            typeBuilder.AddInterfaceImplementation(interfaceType);
+            foreach (var each in interfaceType.GetProperties())
+            {
+                BuildProperty(typeBuilder, each.Name, each.PropertyType);
+            }
+            buildType = typeBuilder.CreateType();
+            TypeCache[targetType] = buildType;
+            return buildType;
+        }
+        private static void BuildProperty(TypeBuilder typeBuilder, string name, Type type)
+        {
+            var field = typeBuilder.DefineField("_" + name.ToLower(), type, FieldAttributes.Private);
+            var propertyBuilder = typeBuilder.DefineProperty(name, System.Reflection.PropertyAttributes.None, type, null);
+
+            var getSetAttr = MethodAttributes.Public | MethodAttributes.HideBySig | MethodAttributes.SpecialName | MethodAttributes.Virtual;
+
+            var getter = typeBuilder.DefineMethod("get_" + name, getSetAttr, type, Type.EmptyTypes);
+            var getIL = getter.GetILGenerator();
+            getIL.Emit(OpCodes.Ldarg_0);
+            getIL.Emit(OpCodes.Ldfld, field);
+            getIL.Emit(OpCodes.Ret);
+
+            var setter = typeBuilder.DefineMethod("set_" + name, getSetAttr, null, new Type[] { type });
+            var setIL = setter.GetILGenerator();
+            setIL.Emit(OpCodes.Ldarg_0);
+            setIL.Emit(OpCodes.Ldarg_1);
+            setIL.Emit(OpCodes.Stfld, field);
+            setIL.Emit(OpCodes.Ret);
+
+            propertyBuilder.SetGetMethod(getter);
+            propertyBuilder.SetSetMethod(setter);
+        }
+    }
+
+    public class Query<Root> : QueryImp
+    {
+        public Query()
+        {
+            RootType = typeof(Root);
+        }
+    }
+
+    public abstract class QueryImp
+    {
+        public QueryImp()
+        {
+            Relations = new List<RelationAttribute>();
+        }
+        public List<RelationAttribute> Relations { get; private set; }
+        public Type RootType { get; protected set; }
+        public string Sql
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(_sql))
+                {
+                    _sql = string.Format("select * from {0} ", RootType.GetTableName());
+                }
+                return _sql;
+            }
+            set { _sql = value; }
+        }
+        private string _sql;
+        public object Parameters { get; set; }
+
+
+        public QueryImp Join<Parent, Child>(string parentPropertyName, string childPropertyName)
+        {
+            Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), parentPropertyName, childPropertyName));
+            return this;
+        }
+        public QueryImp Join<Parent, Child>(string key, string parentPropertyName, string childPropertyName)
+        {
+            Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), key, new[] { parentPropertyName }, new[] { childPropertyName }));
+            return this;
+        }
+        public QueryImp Join<Parent, Child>(string[] parentPropertyNames, string[] childPropertyNames)
+        {
+            Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), parentPropertyNames, childPropertyNames));
+            return this;
+        }
+        public QueryImp Join<Parent, Child>(string key, string[] parentPropertyNames, string[] childPropertyNames)
+        {
+            Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), key, parentPropertyNames, childPropertyNames));
+            return this;
+        }
+    }
+
 
     internal class DapperDataAdapter
     {
-        public int SplitCount { get; set; }
+        public int SplitCount
+        {
+            get { return _splitCount; }
+            set { _splitCount = value; }
+        }
+        private int _splitCount = 100;
 
         RelationAttribute relationAttribute;
         PropertyInfo[] parentPropertyInfo;
@@ -269,8 +448,8 @@ namespace Dapper.Aggregater
             {
                 Key = CreateDefaultKey(ParentType, ChildType);
             }
-            ParentTableName = GetTableName(ParentType);
-            ChildTableName = GetTableName(ChildType);
+            ParentTableName = ParentType.GetTableName();
+            ChildTableName = ChildType.GetTableName();
 
             var parentProperties = ParentType.GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static).ToArray();
             var childProperties = ChildType.GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static).ToArray();
@@ -285,8 +464,18 @@ namespace Dapper.Aggregater
                 parentPropertyAccessors.Add(PropertyAccessorImp.ToAccessor(ppi));
                 childPropertyAccessors.Add(PropertyAccessorImp.ToAccessor(cpi));
             }
-
             DataAdapter = new DapperDataAdapter(this);
+        }
+        public void EnsureDynamicType()
+        {
+            if (!ParentType.GetInterfaces().Any(x => x == typeof(IContainerHolder)))
+            {
+                ParentType = ILGeneratorUtil.InjectionInterfaceWithProperty(ParentType);
+            }
+            if (!ChildType.GetInterfaces().Any(x => x == typeof(IContainerHolder)))
+            {
+                ChildType = ILGeneratorUtil.InjectionInterfaceWithProperty(ChildType);
+            }
         }
 
         [NonSerialized]
@@ -295,27 +484,6 @@ namespace Dapper.Aggregater
         {
             return string.Format("{0}.{1}", parentType.Name, childType.Name);
         }
-        //Dapper.Contrib
-        static string GetTableName(Type type)
-        {
-            string name;
-            if (!TypeTableName.TryGetValue(type.TypeHandle, out name))
-            {
-                name = type.Name + "s";
-                if (type.IsInterface && name.StartsWith("I"))
-                    name = name.Substring(1);
-
-                //NOTE: This as dynamic trick should be able to handle both our own Table-attribute as well as the one in EntityFramework 
-                var tableattr = type.GetCustomAttributes(false).Where(attr => attr.GetType().Name == "TableAttribute").SingleOrDefault() as dynamic;
-                if (tableattr != null)
-                    name = tableattr.Name;
-                TypeTableName[type.TypeHandle] = name;
-            }
-            return name;
-        }
-
-        [NonSerialized]
-        static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
     }
 
     public interface IContainerHolder
@@ -413,6 +581,11 @@ namespace Dapper.Aggregater
             else
             {
                 att = Atts.FirstOrDefault(x => x.ChildType == t);
+                if (att == null)
+                {
+                    var newT = ILGeneratorUtil.InjectionInterfaceWithProperty(typeof(T));
+                    att = Atts.FirstOrDefault(x => x.ChildType == newT);
+                }
                 if (att == null)
                     throw new KeyNotFoundException(typeof(T).Name + " is not found in RelationAttribute");
 

@@ -7,14 +7,10 @@ using Dapper.Aggregater;
 using Dapper.Contrib.Extensions;
 namespace Dapper.Aggregater.SampleConsoleApp.Model
 {
-
-    [Table("CodeTable")]
-    public class CodeTable : IContainerHolder
+    public class CodeTable
     {
         public int CodeTableCD { get; set; }
         public string CodeTableName { get; set; }
         public byte[] Lockversion { get; set; }
-
-        DataContainer IContainerHolder.Container { get; set; }
     }
 }

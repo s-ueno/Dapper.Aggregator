@@ -5,6 +5,7 @@ using System.Text;
 using Dapper;
 using Dapper.Aggregater.SampleConsoleApp.Model;
 using System.Diagnostics;
+using System.Collections;
 
 namespace Dapper.Aggregater.SampleConsoleApp
 {
@@ -12,30 +13,47 @@ namespace Dapper.Aggregater.SampleConsoleApp
     {
         static void Main(string[] args)
         {
-            TransAction(SampleLogic);
+            TransAction(AggregateWithPoco);
+            TransAction(AggregateWithImplementInterface);
         }
-        private static void SampleLogic(DbConnectionHelper helper)
+
+        private static void AggregateWithPoco(DbConnectionHelper helper)
         {
             var sqlMapper = helper.DbConnection;
-            var rows = sqlMapper.QueryWith<EventAggregate>(@"select * from EventTable");
 
+            var query = new Query<EventTable>();
+            query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
+            query.Join<EventDetailsTable, CodeTable>("CodeTableID", "CodeTableCD");
 
+            //query.Sql = "select * from EventTable where EventTableID = @p1";
+            //query.Parameters = new { p1 = 1 };
 
-
+            var rows = sqlMapper.QueryWith(query);
 
             foreach (var row in rows)
             {
-                Trace.TraceInformation(string.Format("EventTable.EventTableID => {0} EventTitle => {1}", row.EventTableID, row.EventTitle));
-                foreach (var each in row.Details)
+                foreach (var each in (row as IContainerHolder).Container.GetChildren<EventDetailsTable>())
                 {
-                    Trace.TraceInformation(string.Format("EventDetailsTable.EventTableID => {0} EventDetailsTableID => {1}", each.EventTableID, each.EventDetailsTableID));
                     foreach (var item in (each as IContainerHolder).Container.GetChildren<CodeTable>())
                     {
-                        Trace.TraceInformation(string.Format("CodeTable.CodeTableCD => {0} CodeTableName => {1}", item.CodeTableCD, item.CodeTableName));
                     }
                 }
             }
+        }
 
+        private static void AggregateWithImplementInterface(DbConnectionHelper helper)
+        {
+            var sqlMapper = helper.DbConnection;
+            var rows = sqlMapper.QueryWith<DefinedAggregate>(@"select * from EventTable");
+            foreach (var row in rows)
+            {
+                foreach (var each in row.Details)
+                {
+                    foreach (var item in (each as IContainerHolder).Container.GetChildren<CodeTable>())
+                    {
+                    }
+                }
+            }
         }
 
 
