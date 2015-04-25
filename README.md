@@ -12,6 +12,7 @@ Defined aggregate-pattern
 [EventTable]
   -[EventDetailsTable]
     -[CodeTable]
+
 When you create EntityClass with an automatic generation tool, attach "IContainerHolder" together.
 ```csharp
     [Relation(typeof(EventDetailsTable), typeof(CodeTable), "CodeTableID", "CodeTableCD")]
