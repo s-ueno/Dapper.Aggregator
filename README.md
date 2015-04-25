@@ -54,6 +54,7 @@ query.Filter = query.Eq(x => x.EventTableID, 0) |
 var rows = sqlMapper.QueryWith(query);
 foreach (var row in rows)
 {
+    // Using 'TypeBuilder', inject interface
     foreach (var each in (row as IContainerHolder).Container.GetChildren<EventDetailsTable>())
     {
         foreach (var item in (each as IContainerHolder).Container.GetChildren<CodeTable>())
