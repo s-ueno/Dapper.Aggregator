@@ -16,13 +16,14 @@ namespace Dapper.Aggregater
         //poco pattern
         // dynamic type. Class cannot step over AppDomain because this use TypeBuilder.
         public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, Query<T> query,
-            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 300)
+            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 100)
         {
             foreach (var each in query.Relations)
             {
                 each.Ensure();
                 each.EnsureDynamicType();
                 each.DataAdapter.SplitCount = splitLength;
+                each.DataAdapter.QueryOptimizerLevel = queryOptimizerLevel;
             }
 
             var oldType = typeof(T);
@@ -31,18 +32,7 @@ namespace Dapper.Aggregater
             var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout, commandType);
             if (rows == null || !rows.Any()) return new T[] { };
 
-            var rootRecordCount = 0;
-            var list = rows as ICollection<object>;
-            if (list != null)
-            {
-                rootRecordCount = list.Count;
-            }
-            else
-            {
-                rootRecordCount = rows.Count();
-            }
-
-            var command = new CommandDefinition(null, null, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
+            var command = new CommandDefinition(query.Sql, query.Parameters, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
             LoadWith(cnn, command, newParentType, query.Relations.ToArray(), rows);
             return rows.Cast<T>();
         }
@@ -51,12 +41,12 @@ namespace Dapper.Aggregater
         //Implement IContainerHolder Interface pattern
         // all typesafe.
         public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, string sql, object param = null,
-            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 300) where T : IContainerHolder
+            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 100) where T : IContainerHolder
         {
             var command = new CommandDefinition(sql, param, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
-            return QueryWith<T>(cnn, command, splitLength);
+            return QueryWith<T>(cnn, command, splitLength, queryOptimizerLevel);
         }
-        public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, CommandDefinition command, int splitLength = 300) where T : IContainerHolder
+        public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, CommandDefinition command, int splitLength = 100, int queryOptimizerLevel = 100) where T : IContainerHolder
         {
             var atts = typeof(T).GetCustomAttributes(typeof(RelationAttribute), true).OfType<RelationAttribute>().ToArray();
             if (!atts.Any())
@@ -65,23 +55,13 @@ namespace Dapper.Aggregater
             var rows = cnn.Query<T>(command);
             if (rows == null || !rows.Any()) return new T[] { };
 
-            var rootRecordCount = 0;
-            var list = rows as ICollection<T>;
-            if (list != null)
-            {
-                rootRecordCount = list.Count;
-            }
-            else
-            {
-                rootRecordCount = rows.Count();
-            }
-
             foreach (var each in atts)
             {
                 if (each.ParentType == null)
                     each.ParentType = typeof(T);
                 each.Ensure();
                 each.DataAdapter.SplitCount = splitLength;
+                each.DataAdapter.QueryOptimizerLevel = queryOptimizerLevel;
             }
 
             LoadWith(cnn, command, typeof(T), atts, rows);
@@ -95,8 +75,6 @@ namespace Dapper.Aggregater
             if (!rootAtts.Any()) return;
 
             var rootDataStore = new DataStore();
-
-
             var enumerator = roots.GetEnumerator();
             var hasValue = enumerator.MoveNext();
             while (hasValue)
@@ -116,7 +94,7 @@ namespace Dapper.Aggregater
 
             foreach (var att in rootAtts)
             {
-                var list = att.DataAdapter.Fill(cnn, command);
+                var list = att.DataAdapter.Fill(cnn, command, atts);
                 att.Loaded = true;
                 rootDataStore.Add(att.Key, list);
                 if (list.Count != 0)
@@ -609,6 +587,12 @@ namespace Dapper.Aggregater
             set { _splitCount = value; }
         }
         private int _splitCount = 100;
+        public int QueryOptimizerLevel
+        {
+            get { return _queryOptimizerLevel; }
+            set { _queryOptimizerLevel = value; }
+        }
+        private int _queryOptimizerLevel = 100;
 
         RelationAttribute relationAttribute;
         PropertyInfo[] parentPropertyInfo;
@@ -645,24 +629,80 @@ namespace Dapper.Aggregater
             }
         }
 
-        public List<object> Fill(IDbConnection cnn, CommandDefinition command)
+        public List<object> Fill(IDbConnection cnn, CommandDefinition command, RelationAttribute[] atts)
         {
             var result = new List<object>();
             var tableType = relationAttribute.ChildType;
             var tableName = relationAttribute.ChildTableName;
             var clause = tableType.GetSelectClause().ToSelectClause();
             var splitCriteria = SplitCriteria();
-            foreach (var each in splitCriteria)
+
+
+            if (QueryOptimizerLevel < splitCriteria.Count)
             {
-                var statement = each.BuildStatement();
-                var param = each.BuildParameters();
-                var sql = string.Format("select {0} from {1} where {2} ", clause, tableName, statement);
-                var rows = cnn.Query(tableType, sql, param, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
+                //nest query pattern
+                var stackCriteria = new Stack<NestCriteria>();
+
+                Type type = relationAttribute.ParentType;
+                var criteria = new NestCriteria(relationAttribute);
+
+                stackCriteria.Push(criteria);
+                while (TryFindNestQuery(atts, ref type, ref criteria))
+                {
+                    stackCriteria.Push(criteria);
+                }
+
+                var sql = string.Empty;
+                var count = stackCriteria.Count;
+                for (int i = 0; i < count; i++)
+                {
+                    var c = stackCriteria.Pop();
+                    if (i == 0)
+                    {
+                        c.View = command.CommandText;
+                    }
+                    else
+                    {
+                        c.View = sql;
+                    }
+                    sql = string.Format(" SELECT {0} FROM {1} WHERE {2}",
+                            c.Att.ChildType.GetSelectClause().ToSelectClause(),
+                            c.Att.ChildTableName,
+                            c.BuildStatement());
+                }
+                var rows = cnn.Query(tableType, sql, command.Parameters, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
                 result.AddRange(rows);
+            }
+            else
+            {
+                //id query pattern
+                foreach (var each in splitCriteria)
+                {
+                    var statement = each.BuildStatement();
+                    var param = each.BuildParameters();
+                    var sql = string.Format("SELECT {0} FROM {1} WHERE {2} ", clause, tableName, statement);
+                    var rows = cnn.Query(tableType, sql, param, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
+                    result.AddRange(rows);
+                }
             }
             return result;
         }
-        private IEnumerable<Criteria> SplitCriteria()
+
+        private bool TryFindNestQuery(RelationAttribute[] atts, ref Type type, ref NestCriteria criteria)
+        {
+            foreach (var each in atts.Where(x => x.Loaded))
+            {
+                if (each.ChildType == type)
+                {
+                    criteria = new NestCriteria(each);
+                    type = each.ParentType;
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private List<Criteria> SplitCriteria()
         {
             var result = new List<Criteria>();
             var criteriaList = childCriteriaList.Distinct().ToList();
@@ -1237,6 +1277,59 @@ namespace Dapper.Aggregater
             var dic = new Dictionary<string, object>();
             dic[string.Format("@p{0}", Index)] = InList;
             return dic;
+        }
+    }
+
+    internal class NestCriteria : Criteria
+    {
+        public string View
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(_view))
+                    return string.Empty;
+
+                var buff = _view.ToUpper();
+                var index = buff.IndexOf("ORDER BY");
+                if (0 < index)
+                {
+                    _view = _view.Substring(0, index - 1);
+                }
+                return _view;
+            }
+            set { _view = value; }
+        }
+        private string _view;
+        public RelationAttribute Att { get; private set; }
+        public NestCriteria(RelationAttribute att)
+        {
+            Att = att;
+        }
+
+        public override Dictionary<string, object> BuildParameters()
+        {
+            return new Dictionary<string, object>();
+        }
+
+        public override string BuildStatement()
+        {
+            var sql = string.Empty;
+
+            var list = new List<string>();
+            for (int i = 0; i < Att.ParentPropertyNames.Length; i++)
+            {
+                var parentProperty = Att.ParentPropertyNames[i];
+                var childProperty = Att.ChildPropertyNames[i];
+
+                list.Add(string.Format(" {0}.{1} = {2}.{3}", Att.ParentTableName, parentProperty, Att.ChildTableName, childProperty));
+            }
+
+            sql = string.Format(" EXISTS(SELECT 1 FROM {0} {1} WHERE {2})",
+                string.IsNullOrWhiteSpace(View) ? string.Empty : string.Format("({0})", View),
+                Att.ParentTableName,
+                string.Join(" AND ", list));
+
+            return sql;
         }
     }
 

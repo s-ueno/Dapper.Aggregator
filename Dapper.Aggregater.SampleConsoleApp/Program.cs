@@ -38,7 +38,7 @@ namespace Dapper.Aggregater.SampleConsoleApp
                  .GroupBy(x => x.EventTitle)
                  .GroupBy(x => x.Lockversion);
 
-            query.Having = query.Eq(x => x.EventTableID, 3);
+            //query.Having = query.Eq(x => x.EventTableID, 3);
 
             query.OrderBy(x => x.EventTableID)
                  .OrderByDesc(x => x.EventTitle);
