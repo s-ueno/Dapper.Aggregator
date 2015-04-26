@@ -10,6 +10,7 @@ I improve Criteria Pattern a little more and consider that I can easily make Sql
 Dynamic aggregate-pattern
 --------
 all poco
+
 ```csharp
     public class EventTable
     {
@@ -54,7 +55,7 @@ query.Filter = query.Eq(x => x.EventTableID, 0) |
 var rows = sqlMapper.QueryWith(query);
 foreach (var row in rows)
 {
-    // Using 'TypeBuilder', inject interface
+    // If the class does not implement interface(IContainerHolder), I embed interface dynamically using TypeBuilder.
     foreach (var each in (row as IContainerHolder).Container.GetChildren<EventDetailsTable>())
     {
         foreach (var item in (each as IContainerHolder).Container.GetChildren<CodeTable>())
@@ -97,20 +98,21 @@ When you create EntityClass with an automatic generation tool, attach "IContaine
 Defined aggregate-pattern Example
 --------
 ```csharp
-var rows = sqlMapper.QueryWith<EventAggregate>(@"select * from EventTable");
 
-foreach (var row in rows)
+var query = new Query<EventAggregate>();
+//It is not necessary to use the Join method
+var rows = sqlMapper.QueryWith(query);
+foreach (var each in rows)
 {
-    Trace.TraceInformation(string.Format("EventTable.EventTableID => {0} EventTitle => {1}", row.EventTableID, row.EventTitle));
-    foreach (var each in row.Details)
+    foreach (var detail in each.Details)
     {
-        Trace.TraceInformation(string.Format("EventDetailsTable.EventTableID => {0} EventDetailsTableID => {1}", each.EventTableID, each.EventDetailsTableID));
-        foreach (var item in (each as IContainerHolder).Container.GetChildren<CodeTable>())
+        foreach (var item in (detail as IContainerHolder).Container.GetChildren<CodeTable>())
         {
-            Trace.TraceInformation(string.Format("CodeTable.CodeTableCD => {0} CodeTableName => {1}", item.CodeTableCD, item.CodeTableName));
+            
         }
     }
 }
+
 ```
 
 
