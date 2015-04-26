@@ -15,6 +15,7 @@ namespace Dapper.Aggregater.SampleConsoleApp
         static void Main(string[] args)
         {
             TransAction(AggregateWithPoco);
+            TransAction(DefinedAggregatePattern);
         }
 
         private static void AggregateWithPoco(IDbConnection sqlMapper)
@@ -58,6 +59,24 @@ namespace Dapper.Aggregater.SampleConsoleApp
                 {
                     foreach (var item in (each as IContainerHolder).Container.GetChildren<CodeTable>())
                     {
+                    }
+                }
+            }
+        }
+
+        private static void DefinedAggregatePattern(IDbConnection sqlMapper)
+        {
+            var query = new Query<DefinedAggregate>();
+
+            var rows = sqlMapper.QueryWith(query);
+
+            foreach (var each in rows)
+            {
+                foreach (var detail in each.Details)
+                {
+                    foreach (var item in (detail as IContainerHolder).Container.GetChildren<CodeTable>())
+                    {
+                        
                     }
                 }
             }
