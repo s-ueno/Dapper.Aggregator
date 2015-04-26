@@ -36,21 +36,16 @@ all poco
 
 Dynamic aggregate-pattern Example
 --------
-and simple poco Criteria Pattern 
-
+simple poco Pattern 
 
 ```csharp
 var query = new Query<EventTable>();
-query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
-query.Join<EventDetailsTable, CodeTable>(parent => parent.CodeTableID, child => child.CodeTableCD);
 
-query.Filter = query.Eq(x => x.EventTableID, 0) |
-               query.NotEq(x => x.EventTableID, 1) &
-               query.Between(x => x.EventTime, DateTime.Now.AddYears(-10), DateTime.Now.AddYears(10)) &
-               query.In(x => x.EventTableID, 0, 10000) &
-               !query.Like(x => x.EventTitle, "AAAAA", LikeCriteria.Match.Start) |
-               query.LessThan(x => x.EventTableID, 100) &
-               query.IsNotNull(x => x.EventTableID);
+//[EventTable]-[EventDetailsTable]
+query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
+
+//[EventDetailsTable]-[CodeTable]
+query.Join<EventDetailsTable, CodeTable>(parent => parent.CodeTableID, child => child.CodeTableCD);
 
 var rows = sqlMapper.QueryWith(query);
 foreach (var row in rows)
@@ -63,6 +58,37 @@ foreach (var row in rows)
         }
     }
 }
+```
+Other features 
+
+Criteria Pattern 
+```csharp
+
+var query = new Query<EventTable>();
+query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
+query.Join<EventDetailsTable, CodeTable>(parent => parent.CodeTableID, child => child.CodeTableCD);
+
+//build criteria
+query.Filter = query.Eq(x => x.EventTableID, 0) |
+               query.NotEq(x => x.EventTableID, 1) &
+               query.Between(x => x.EventTime, DateTime.Now.AddYears(-10), DateTime.Now.AddYears(10)) &
+               query.In(x => x.EventTableID, 0, 10000) &
+               !query.Like(x => x.EventTitle, "AAAAA", LikeCriteria.Match.Start) |
+               query.LessThan(x => x.EventTableID, 100) &
+               query.IsNotNull(x => x.EventTableID) &
+               query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
+
+query.GroupBy(x => x.EventTableID)
+     .GroupBy(x => x.EventTime)
+     .GroupBy(x => x.EventTitle)
+     .GroupBy(x => x.Lockversion);
+
+query.Having = query.Eq(x => x.EventTableID, 3);
+
+query.OrderBy(x => x.EventTableID)
+     .OrderByDesc(x => x.EventTitle);
+     
+var rows = sqlMapper.QueryWith(query);
 ```
 
 
