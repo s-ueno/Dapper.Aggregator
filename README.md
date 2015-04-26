@@ -10,6 +10,7 @@ I improve Criteria Pattern a little more and consider that I can easily make Sql
 Dynamic aggregate-pattern
 --------
 all poco
+
 ```csharp
     public class EventTable
     {
@@ -35,26 +36,21 @@ all poco
 
 Dynamic aggregate-pattern Example
 --------
-and simple poco Criteria Pattern 
-
+simple poco Pattern 
 
 ```csharp
 var query = new Query<EventTable>();
-query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
-query.Join<EventDetailsTable, CodeTable>("CodeTableID", "CodeTableCD");
 
-query.Filter = query.Eq(x => x.EventTableID, 0) |
-               query.NotEq(x => x.EventTableID, 1) &
-               query.Between(x => x.EventTime, DateTime.Now.AddYears(-10), DateTime.Now.AddYears(10)) &
-               query.In(x => x.EventTableID, 0, 10000) &
-               !query.Like(x => x.EventTitle, "AAAAA", LikeCriteria.Match.Start) |
-               query.LessThan(x => x.EventTableID, 100) &
-               query.IsNotNull(x => x.EventTableID);
+//[EventTable]-[EventDetailsTable]
+query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
+
+//[EventDetailsTable]-[CodeTable]
+query.Join<EventDetailsTable, CodeTable>(parent => parent.CodeTableID, child => child.CodeTableCD);
 
 var rows = sqlMapper.QueryWith(query);
 foreach (var row in rows)
 {
-    // Using 'TypeBuilder', inject interface
+    // If the class does not implement interface(IContainerHolder), I embed interface dynamically using TypeBuilder.
     foreach (var each in (row as IContainerHolder).Container.GetChildren<EventDetailsTable>())
     {
         foreach (var item in (each as IContainerHolder).Container.GetChildren<CodeTable>())
@@ -62,6 +58,37 @@ foreach (var row in rows)
         }
     }
 }
+```
+Other features 
+
+Criteria Pattern 
+```csharp
+
+var query = new Query<EventTable>();
+query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
+query.Join<EventDetailsTable, CodeTable>(parent => parent.CodeTableID, child => child.CodeTableCD);
+
+//build criteria
+query.Filter = query.Eq(x => x.EventTableID, 0) |
+               query.NotEq(x => x.EventTableID, 1) &
+               query.Between(x => x.EventTime, DateTime.Now.AddYears(-10), DateTime.Now.AddYears(10)) &
+               query.In(x => x.EventTableID, 0, 10000) &
+               !query.Like(x => x.EventTitle, "AAAAA", LikeCriteria.Match.Start) |
+               query.LessThan(x => x.EventTableID, 100) &
+               query.IsNotNull(x => x.EventTableID) &
+               query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
+
+query.GroupBy(x => x.EventTableID)
+     .GroupBy(x => x.EventTime)
+     .GroupBy(x => x.EventTitle)
+     .GroupBy(x => x.Lockversion);
+
+query.Having = query.Eq(x => x.EventTableID, 3);
+
+query.OrderBy(x => x.EventTableID)
+     .OrderByDesc(x => x.EventTitle);
+     
+var rows = sqlMapper.QueryWith(query);
 ```
 
 
@@ -97,20 +124,21 @@ When you create EntityClass with an automatic generation tool, attach "IContaine
 Defined aggregate-pattern Example
 --------
 ```csharp
-var rows = sqlMapper.QueryWith<EventAggregate>(@"select * from EventTable");
 
-foreach (var row in rows)
+var query = new Query<EventAggregate>();
+//It is not necessary to use the Join method
+var rows = sqlMapper.QueryWith(query);
+foreach (var each in rows)
 {
-    Trace.TraceInformation(string.Format("EventTable.EventTableID => {0} EventTitle => {1}", row.EventTableID, row.EventTitle));
-    foreach (var each in row.Details)
+    foreach (var detail in each.Details)
     {
-        Trace.TraceInformation(string.Format("EventDetailsTable.EventTableID => {0} EventDetailsTableID => {1}", each.EventTableID, each.EventDetailsTableID));
-        foreach (var item in (each as IContainerHolder).Container.GetChildren<CodeTable>())
+        foreach (var item in (detail as IContainerHolder).Container.GetChildren<CodeTable>())
         {
-            Trace.TraceInformation(string.Format("CodeTable.CodeTableCD => {0} CodeTableName => {1}", item.CodeTableCD, item.CodeTableName));
+            
         }
     }
 }
+
 ```
 
 
