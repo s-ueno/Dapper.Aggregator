@@ -148,6 +148,8 @@ namespace Dapper.Aggregater
                 {
                     if (each.PropertyType == typeof(DataContainer))
                         continue;
+                    if (!each.CanWrite)
+                        continue;
                     clause.Add(CreateColumnInfo(each));
                 }
             }
