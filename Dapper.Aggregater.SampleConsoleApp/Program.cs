@@ -38,7 +38,7 @@ namespace Dapper.Aggregater.SampleConsoleApp
                  .GroupBy(x => x.EventTitle)
                  .GroupBy(x => x.Lockversion);
 
-            query.Having = query.Eq(x => x.EventTableID, 3);
+            //query.Having = query.Eq(x => x.EventTableID, 3);
 
             query.OrderBy(x => x.EventTableID)
                  .OrderByDesc(x => x.EventTitle);
@@ -49,7 +49,7 @@ namespace Dapper.Aggregater.SampleConsoleApp
 
 
             //nest query pattern(performance)
-            //var rows = sqlMapper.QueryWith(query, splitLength: 1, queryOptimizerLevel: 1);
+            //var rows = sqlMapper.QueryWith(query, splitLength: 1, queryOptimizerLevel: 2);
 
 
             var rows = sqlMapper.QueryWith(query);

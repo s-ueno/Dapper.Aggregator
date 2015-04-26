@@ -16,7 +16,7 @@ namespace Dapper.Aggregater
         //poco pattern
         // If the class does not implement interface(IContainerHolder), I embed interface dynamically using TypeBuilder.
         public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, Query<T> query,
-            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 100)
+            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 10)
         {
             foreach (var each in query.Relations)
             {
@@ -35,7 +35,7 @@ namespace Dapper.Aggregater
             var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout, commandType);
             if (rows == null || !rows.Any()) return new T[] { };
 
-            var command = new CommandDefinition(query.Sql, query.Parameters, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
+            var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
             LoadWith(cnn, command, newParentType, query.Relations.ToArray(), rows);
             return rows.Cast<T>();
         }
