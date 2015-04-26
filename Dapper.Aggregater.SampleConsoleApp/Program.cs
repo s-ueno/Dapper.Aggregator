@@ -6,6 +6,7 @@ using Dapper;
 using Dapper.Aggregater.SampleConsoleApp.Model;
 using System.Diagnostics;
 using System.Collections;
+using System.Data;
 
 namespace Dapper.Aggregater.SampleConsoleApp
 {
@@ -17,10 +18,8 @@ namespace Dapper.Aggregater.SampleConsoleApp
             TransAction(AggregateWithImplementInterface);
         }
 
-        private static void AggregateWithPoco(DbConnectionHelper helper)
+        private static void AggregateWithPoco(IDbConnection sqlMapper)
         {
-            var sqlMapper = helper.DbConnection;
-
             var query = new Query<EventTable>();
             query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
             query.Join<EventDetailsTable, CodeTable>("CodeTableID", "CodeTableCD");
@@ -31,7 +30,8 @@ namespace Dapper.Aggregater.SampleConsoleApp
                            query.In(x => x.EventTableID, 0, 10000) &
                            !query.Like(x => x.EventTitle, "AAAAA", LikeCriteria.Match.Start) |
                            query.LessThan(x => x.EventTableID, 100) &
-                           query.IsNotNull(x => x.EventTableID);
+                           query.IsNotNull(x => x.EventTableID) &
+                           query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
 
             //debug statement
             Trace.TraceInformation(query.Filter.BuildStatement());
@@ -49,9 +49,8 @@ namespace Dapper.Aggregater.SampleConsoleApp
             }
         }
 
-        private static void AggregateWithImplementInterface(DbConnectionHelper helper)
+        private static void AggregateWithImplementInterface(IDbConnection sqlMapper)
         {
-            var sqlMapper = helper.DbConnection;
             var rows = sqlMapper.QueryWith<DefinedAggregate>(@"select * from EventTable");
             foreach (var row in rows)
             {
@@ -65,7 +64,7 @@ namespace Dapper.Aggregater.SampleConsoleApp
         }
 
 
-        public static void TransAction(Action<DbConnectionHelper> action)
+        public static void TransAction(Action<IDbConnection> action)
         {
             using (var helper = DbConnectionRepository.CreateDbHelper())
             {
@@ -74,7 +73,7 @@ namespace Dapper.Aggregater.SampleConsoleApp
                 {
                     helper.BeginTransaction();
 
-                    action(helper);
+                    action(helper.DbConnection);
 
                     helper.Commit();
                 }
