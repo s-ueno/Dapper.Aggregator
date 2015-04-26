@@ -25,7 +25,8 @@ namespace Dapper.Aggregater
                 each.DataAdapter.SplitCount = splitLength;
             }
 
-            var newParentType = query.Relations.Any() ? ILGeneratorUtil.InjectionInterfaceWithProperty(typeof(T)) : typeof(T);
+            var oldType = typeof(T);
+            var newParentType = ILGeneratorUtil.IsInjected(oldType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(oldType) : oldType;
 
             var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout, commandType);
             if (rows == null || !rows.Any()) return new T[] { };
@@ -145,6 +146,88 @@ namespace Dapper.Aggregater
             return name;
         }
         static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
+
+        internal static ColumnInfoCollection GetSelectClause(this Type type)
+        {
+            ColumnInfoCollection clause = null;
+            if (!TypeSelectClause.TryGetValue(type.TypeHandle, out clause))
+            {
+                clause = new ColumnInfoCollection();
+                var props = type.GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static).ToArray();
+                foreach (var each in props)
+                {
+                    if (each.PropertyType == typeof(DataContainer))
+                        continue;
+                    clause.Add(CreateColumnInfo(each));
+                }
+            }
+            return clause;
+        }
+        static readonly ConcurrentDictionary<RuntimeTypeHandle, ColumnInfoCollection> TypeSelectClause
+            = new ConcurrentDictionary<RuntimeTypeHandle, ColumnInfoCollection>();
+        private static ColumnInfoAttribute CreateColumnInfo(PropertyInfo pi)
+        {
+            var ret = new ColumnInfoAttribute();
+            ret.Name = pi.Name;
+
+            var allAtts = pi.GetCustomAttributes(false).ToArray();
+            var cInfo = allAtts.OfType<ColumnInfoAttribute>().FirstOrDefault();
+            if (cInfo != null)
+                return cInfo;
+
+            //recommend  System.Data.Linq.Mapping.ColumnAttribute. but It should be only Name property.
+            var columnAtt = allAtts.SingleOrDefault(x => x.GetType().Name == "ColumnAttribute") as dynamic;
+            if (columnAtt != null)
+            {
+                SetColumnInfoFromColumnAttribute(ret, columnAtt);
+            }
+            var dcc = allAtts.SingleOrDefault(x => x.GetType().FullName == "Dapper.Contrib.Extensions.ComputedAttribute");
+            if (dcc != null)
+            {
+                ret.Ignore = true;
+            }
+            var key = allAtts.SingleOrDefault(x => x.GetType().FullName == "Dapper.Contrib.Extensions.KeyAttribute");
+            if (dcc != null)
+            {
+                ret.IsPrimaryKey = true;
+            }
+            return ret;
+        }
+        private static void SetColumnInfoFromColumnAttribute(ColumnInfoAttribute info, dynamic att)
+        {
+            if (att == null) return;
+            try
+            {
+                info.Name = att.Name;
+            }
+            catch { }
+
+            try
+            {
+                info.Expression = att.Expression as string;
+            }
+            catch { }
+
+            try
+            {
+                info.IsPrimaryKey = (bool)att.IsPrimaryKey;
+            }
+            catch { }
+
+            try
+            {
+                info.IsVersion = (bool)att.IsVersion;
+            }
+            catch { }
+
+            try
+            {
+                info.DbType = att.DbType as string;
+            }
+            catch { }
+        }
+
+
         internal static string ToSymbol(this Expression expr)
         {
             if (expr == null)
@@ -162,6 +245,37 @@ namespace Dapper.Aggregater
     }
 
 
+    public class ColumnInfoAttribute : Attribute
+    {
+        public string Name { get; set; }
+        public string Expression { get; set; }
+        public bool IsPrimaryKey { get; set; }
+        public bool IsVersion { get; set; }
+        public bool Ignore { get; set; }
+        public string DbType { get; set; }
+    }
+    internal class ColumnInfoCollection : List<ColumnInfoAttribute>
+    {
+        public string ToSelectClause()
+        {
+            var list = new List<string>();
+            foreach (var each in this)
+            {
+                if (each.Ignore)
+                    continue;
+
+                var ret = each.Name;
+                if (!string.IsNullOrWhiteSpace(each.Expression))
+                {
+                    ret = string.Format("({0}) AS {1}", each.Expression, each.Name);
+                }
+                list.Add(ret);
+            }
+            return string.Join(",", list);
+        }
+    }
+
+
     internal static class ILGeneratorUtil
     {
         private static readonly ConcurrentDictionary<Type, Type> TypeCache = new ConcurrentDictionary<Type, Type>();
@@ -171,6 +285,11 @@ namespace Dapper.Aggregater
             dynamicAssemblyBuilder = System.Threading.Thread.GetDomain().DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
         }
         private static readonly AssemblyBuilder dynamicAssemblyBuilder;
+
+        public static bool IsInjected(Type type)
+        {
+            return TypeCache.ContainsKey(type);
+        }
 
         public static Type InjectionInterfaceWithProperty(Type targetType)
         {
@@ -309,9 +428,10 @@ namespace Dapper.Aggregater
             {
                 if (Filter == null)
                 {
-                    return string.Format("select * from {0} ", RootType.GetTableName());
+                    return string.Format("select {0} from {1} ", RootType.GetSelectClause().ToSelectClause(), RootType.GetTableName());
                 }
-                return string.Format("select * from {0} where {1} ", RootType.GetTableName(), Filter.BuildStatement());
+                return string.Format("select {0} from {1} where {2} ", 
+                    RootType.GetSelectClause().ToSelectClause(), RootType.GetTableName(), Filter.BuildStatement());
             }
         }
         internal object Parameters { get { return Filter == null ? null : Filter.BuildParameters(); } }
@@ -390,14 +510,15 @@ namespace Dapper.Aggregater
             var result = new List<object>();
             var tableType = relationAttribute.ChildType;
             var tableName = relationAttribute.ChildTableName;
+            var clause = tableType.GetSelectClause().ToSelectClause();
             var splitCriteria = SplitCriteria();
             foreach (var each in splitCriteria)
             {
                 var statement = each.BuildStatement();
                 var param = each.BuildParameters();
-                var sql = string.Format("select * from {0} where {1} ", tableName, statement);
+                var sql = string.Format("select {0} from {1} where {2} ", clause, tableName, statement);
                 var rows = cnn.Query(tableType, sql, param, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
-
+                Trace.TraceInformation(sql);
                 result.AddRange(rows);
             }
             return result;
