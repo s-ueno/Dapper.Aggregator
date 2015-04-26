@@ -20,6 +20,9 @@ namespace Dapper.Aggregater
         {
             foreach (var each in query.Relations)
             {
+                if (each.ParentType == null)
+                    each.ParentType = typeof(T);
+
                 each.Ensure();
                 each.EnsureDynamicType();
                 each.DataAdapter.SplitCount = splitLength;
@@ -59,6 +62,7 @@ namespace Dapper.Aggregater
             {
                 if (each.ParentType == null)
                     each.ParentType = typeof(T);
+
                 each.Ensure();
                 each.DataAdapter.SplitCount = splitLength;
                 each.DataAdapter.QueryOptimizerLevel = queryOptimizerLevel;
@@ -118,7 +122,15 @@ namespace Dapper.Aggregater
                 //NOTE: This as dynamic trick should be able to handle both our own Table-attribute as well as the one in EntityFramework 
                 var tableattr = type.GetCustomAttributes(false).Where(attr => attr.GetType().Name == "TableAttribute").SingleOrDefault() as dynamic;
                 if (tableattr != null)
+                {
                     name = tableattr.Name;
+                }
+                else
+                {
+                    tableattr = type.GetCustomAttributes(true).Where(attr => attr.GetType().Name == "TableAttribute").SingleOrDefault() as dynamic;
+                    if (tableattr != null)
+                        name = tableattr.Name;
+                }
                 TypeTableName[type.TypeHandle] = name;
             }
             return name;
@@ -340,6 +352,8 @@ namespace Dapper.Aggregater
         public Query()
         {
             RootType = typeof(Root);
+            var atts = RootType.GetCustomAttributes(typeof(RelationAttribute), true).OfType<RelationAttribute>().ToArray();
+            Relations.AddRange(atts);
         }
 
         public Criteria Eq<P>(Expression<Func<Root, P>> property, P obj)
@@ -443,6 +457,14 @@ namespace Dapper.Aggregater
             {
                 return string.Format("SELECT {0} {1} FROM {2} {3} {4} {5} {6}",
                     SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause, OrderByClause);
+            }
+        }
+        public string SqlIgnoreOrderBy
+        {
+            get
+            {
+                return string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
+                    SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause);
             }
         }
 
@@ -1282,24 +1304,7 @@ namespace Dapper.Aggregater
 
     internal class NestCriteria : Criteria
     {
-        public string View
-        {
-            get
-            {
-                if (string.IsNullOrWhiteSpace(_view))
-                    return string.Empty;
-
-                var buff = _view.ToUpper();
-                var index = buff.IndexOf("ORDER BY");
-                if (0 < index)
-                {
-                    _view = _view.Substring(0, index - 1);
-                }
-                return _view;
-            }
-            set { _view = value; }
-        }
-        private string _view;
+        public string View { get; set; }
         public RelationAttribute Att { get; private set; }
         public NestCriteria(RelationAttribute att)
         {

@@ -11,6 +11,7 @@ namespace Dapper.Aggregater.SampleConsoleApp
     [Relation(typeof(EventDetailsTable_Holder), "EventTableID", "EventTableID")]
     public class DefinedAggregate : EventTable_Holder
     {
+        [ColumnInfo(Ignore=true)]
         public EventDetailsTable[] Details
         {
             get
