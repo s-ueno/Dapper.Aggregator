@@ -7,7 +7,6 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregater", "Dapper
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ExternalFiles", "ExternalFiles", "{ECB32CDC-636C-47F4-8968-71080736F850}"
 	ProjectSection(SolutionItems) = preProject
-		ExternalFiles\Dapper.Contrib.dll = ExternalFiles\Dapper.Contrib.dll
 		ExternalFiles\Dapper.dll = ExternalFiles\Dapper.dll
 		ExternalFiles\SampleDB.sdf = ExternalFiles\SampleDB.sdf
 		ExternalFiles\sqlceca40.dll = ExternalFiles\sqlceca40.dll

@@ -4,7 +4,6 @@ using System.Linq;
 using System.Text;
 using Dapper;
 using Dapper.Aggregater;
-using Dapper.Contrib.Extensions;
 namespace Dapper.Aggregater.SampleConsoleApp.Model
 {
     public class CodeTable

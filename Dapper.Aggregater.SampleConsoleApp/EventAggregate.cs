@@ -29,12 +29,12 @@ namespace Dapper.Aggregater.SampleConsoleApp
   
     //When you create EntityClass with an automatic generation tool, attach "IContainerHolder" together.
 
-    [Dapper.Contrib.Extensions.Table("EventTable")]
+    [Table("EventTable")]
     public class EventTable_Holder : EventTable, IContainerHolder
     {
         DataContainer IContainerHolder.Container { get; set; }
     }
-    [Dapper.Contrib.Extensions.Table("EventDetailsTable")]
+    [Table("EventDetailsTable")]
     public class EventDetailsTable_Holder : EventDetailsTable, IContainerHolder
     {
         DataContainer IContainerHolder.Container { get; set; }
