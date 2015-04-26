@@ -14,7 +14,7 @@ namespace Dapper.Aggregater
     public static class DapperExtensions
     {
         //poco pattern
-        // dynamic type. Class cannot step over AppDomain because this use TypeBuilder.
+        // If the class does not implement interface(IContainerHolder), I embed interface dynamically using TypeBuilder.
         public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, Query<T> query,
             IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 100)
         {
@@ -41,37 +41,37 @@ namespace Dapper.Aggregater
         }
 
 
-        //Implement IContainerHolder Interface pattern
-        // all typesafe.
-        public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, string sql, object param = null,
-            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 100) where T : IContainerHolder
-        {
-            var command = new CommandDefinition(sql, param, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
-            return QueryWith<T>(cnn, command, splitLength, queryOptimizerLevel);
-        }
-        public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, CommandDefinition command, int splitLength = 100, int queryOptimizerLevel = 100) where T : IContainerHolder
-        {
-            var atts = typeof(T).GetCustomAttributes(typeof(RelationAttribute), true).OfType<RelationAttribute>().ToArray();
-            if (!atts.Any())
-                throw new InvalidOperationException("QueryWith is function to use DataRelationAttribute.");
+        ////Implement IContainerHolder Interface pattern
+        //// all typesafe.
+        //public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, string sql, object param = null,
+        //    IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 100) where T : IContainerHolder
+        //{
+        //    var command = new CommandDefinition(sql, param, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
+        //    return QueryWith<T>(cnn, command, splitLength, queryOptimizerLevel);
+        //}
+        //public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, CommandDefinition command, int splitLength = 100, int queryOptimizerLevel = 100) where T : IContainerHolder
+        //{
+        //    var atts = typeof(T).GetCustomAttributes(typeof(RelationAttribute), true).OfType<RelationAttribute>().ToArray();
+        //    if (!atts.Any())
+        //        throw new InvalidOperationException("QueryWith is function to use DataRelationAttribute.");
 
-            var rows = cnn.Query<T>(command);
-            if (rows == null || !rows.Any()) return new T[] { };
+        //    var rows = cnn.Query<T>(command);
+        //    if (rows == null || !rows.Any()) return new T[] { };
 
-            foreach (var each in atts)
-            {
-                if (each.ParentType == null)
-                    each.ParentType = typeof(T);
+        //    foreach (var each in atts)
+        //    {
+        //        if (each.ParentType == null)
+        //            each.ParentType = typeof(T);
 
-                each.Ensure();
-                each.DataAdapter.SplitCount = splitLength;
-                each.DataAdapter.QueryOptimizerLevel = queryOptimizerLevel;
-            }
+        //        each.Ensure();
+        //        each.DataAdapter.SplitCount = splitLength;
+        //        each.DataAdapter.QueryOptimizerLevel = queryOptimizerLevel;
+        //    }
 
-            LoadWith(cnn, command, typeof(T), atts, rows);
+        //    LoadWith(cnn, command, typeof(T), atts, rows);
 
-            return rows;
-        }
+        //    return rows;
+        //}
 
         private static void LoadWith(IDbConnection cnn, CommandDefinition command, Type t, RelationAttribute[] atts, System.Collections.IEnumerable roots)
         {
