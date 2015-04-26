@@ -233,7 +233,17 @@ namespace Dapper.Aggregater
             if (expr == null)
                 return null;
 
-            var memExp = (expr as LambdaExpression).Body as MemberExpression;
+            var lambdaExp = (LambdaExpression)expr;
+            var memExp = lambdaExp.Body as MemberExpression;
+            if (memExp == null)
+            {
+                var convert = lambdaExp.Body as UnaryExpression;
+                if (convert != null)
+                {
+                    memExp = convert.Operand as MemberExpression;
+                }
+            }
+
             var list = new List<string>();
             while (memExp is MemberExpression)
             {
@@ -439,32 +449,64 @@ namespace Dapper.Aggregater
                 {
                     return string.Format("select {0} from {1} ", RootType.GetSelectClause().ToSelectClause(), RootType.GetTableName());
                 }
-                return string.Format("select {0} from {1} where {2} ", 
+                return string.Format("select {0} from {1} where {2} ",
                     RootType.GetSelectClause().ToSelectClause(), RootType.GetTableName(), Filter.BuildStatement());
             }
         }
         internal object Parameters { get { return Filter == null ? null : Filter.BuildParameters(); } }
         public Criteria Filter { get; set; }
+
+
+
+        public QueryImp Join<Parent, Child>(Expression<Func<Parent, object>> parentProperty = null, Expression<Func<Child, object>> childProperty = null)
+        {
+            return Join<Parent, Child>(parentProperty.ToSymbol(), childProperty.ToSymbol());
+        }
         public QueryImp Join<Parent, Child>(string parentPropertyName, string childPropertyName)
         {
             Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), parentPropertyName, childPropertyName));
             return this;
+        }
+
+
+        public QueryImp Join<Parent, Child>(string key, Expression<Func<Parent, object>> parentProperty = null, Expression<Func<Child, object>> childProperty = null)
+        {
+            return Join<Parent, Child>(key, parentProperty.ToSymbol(), childProperty.ToSymbol());
         }
         public QueryImp Join<Parent, Child>(string key, string parentPropertyName, string childPropertyName)
         {
             Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), key, new[] { parentPropertyName }, new[] { childPropertyName }));
             return this;
         }
+
+
+        public QueryImp Join<Parent, Child>(Expression<Func<Parent, object>>[] parentProperties = null, Expression<Func<Child, object>>[] childProperties = null)
+        {
+            return Join<Parent, Child>(
+                parentProperties.Select(x => x.ToSymbol()).ToArray(),
+                childProperties.Select(x => x.ToSymbol()).ToArray());
+        }
         public QueryImp Join<Parent, Child>(string[] parentPropertyNames, string[] childPropertyNames)
         {
             Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), parentPropertyNames, childPropertyNames));
             return this;
+        }
+
+        public QueryImp Join<Parent, Child>(string key, Expression<Func<Parent, object>>[] parentProperties = null, Expression<Func<Child, object>>[] childProperties = null)
+        {
+            return Join<Parent, Child>(
+                key,
+                parentProperties.Select(x => x.ToSymbol()).ToArray(),
+                childProperties.Select(x => x.ToSymbol()).ToArray());
         }
         public QueryImp Join<Parent, Child>(string key, string[] parentPropertyNames, string[] childPropertyNames)
         {
             Relations.Add(new RelationAttribute(typeof(Parent), typeof(Child), key, parentPropertyNames, childPropertyNames));
             return this;
         }
+
+
+
 
 
     }

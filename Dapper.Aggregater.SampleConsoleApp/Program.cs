@@ -22,7 +22,7 @@ namespace Dapper.Aggregater.SampleConsoleApp
         {
             var query = new Query<EventTable>();
             query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
-            query.Join<EventDetailsTable, CodeTable>("CodeTableID", "CodeTableCD");
+            query.Join<EventDetailsTable, CodeTable>(parent => parent.CodeTableID, child => child.CodeTableCD);
 
             query.Filter = query.Eq(x => x.EventTableID, 0) |
                            query.NotEq(x => x.EventTableID, 1) &
