@@ -518,7 +518,6 @@ namespace Dapper.Aggregater
                 var param = each.BuildParameters();
                 var sql = string.Format("select {0} from {1} where {2} ", clause, tableName, statement);
                 var rows = cnn.Query(tableType, sql, param, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
-                Trace.TraceInformation(sql);
                 result.AddRange(rows);
             }
             return result;
