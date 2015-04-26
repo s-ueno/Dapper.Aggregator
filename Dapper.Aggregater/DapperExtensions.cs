@@ -244,7 +244,16 @@ namespace Dapper.Aggregater
         }
     }
 
-
+    [AttributeUsage(AttributeTargets.Class)]
+    public class TableAttribute : Attribute
+    {
+        public TableAttribute(string tableName)
+        {
+            Name = tableName;
+        }
+        public string Name { get; private set; }
+    }
+    [AttributeUsage(AttributeTargets.Property)]
     public class ColumnInfoAttribute : Attribute
     {
         public string Name { get; set; }
