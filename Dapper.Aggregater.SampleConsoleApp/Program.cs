@@ -33,6 +33,16 @@ namespace Dapper.Aggregater.SampleConsoleApp
                            query.IsNotNull(x => x.EventTableID) &
                            query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
 
+            query.GroupBy(x => x.EventTableID)
+                 .GroupBy(x => x.EventTime)
+                 .GroupBy(x => x.EventTitle)
+                 .GroupBy(x => x.Lockversion);
+
+            query.Having = query.Eq(x => x.EventTableID, 3);
+
+            query.OrderBy(x => x.EventTableID)
+                 .OrderByDesc(x => x.EventTitle);
+
             //debug statement
             Trace.TraceInformation(query.Filter.BuildStatement());
             Trace.TraceInformation(query.Sql);

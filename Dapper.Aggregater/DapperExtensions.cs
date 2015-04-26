@@ -429,6 +429,22 @@ namespace Dapper.Aggregater
         {
             return new ExpressionCriteria(string.Format(" {0} IS NOT NULL ", property.ToSymbol()));
         }
+
+        public Query<Root> OrderBy<P>(Expression<Func<Root, P>> property)
+        {
+            Sorts.Add(string.Format("{0} ASC", property.ToSymbol()));
+            return this;
+        }
+        public Query<Root> OrderByDesc<P>(Expression<Func<Root, P>> property)
+        {
+            Sorts.Add(string.Format("{0} DESC", property.ToSymbol()));
+            return this;
+        }
+        public Query<Root> GroupBy<P>(Expression<Func<Root, P>> property)
+        {
+            Groups.Add(property.ToSymbol());
+            return this;
+        }
     }
 
     public abstract class QueryImp
@@ -438,6 +454,8 @@ namespace Dapper.Aggregater
         public QueryImp()
         {
             Relations = new List<RelationAttribute>();
+            Sorts = new List<string>();
+            Groups = new List<string>();
         }
         public List<RelationAttribute> Relations { get; private set; }
         public Type RootType { get; protected set; }
@@ -445,19 +463,90 @@ namespace Dapper.Aggregater
         {
             get
             {
-                if (Filter == null)
-                {
-                    return string.Format("select {0} from {1} ", RootType.GetSelectClause().ToSelectClause(), RootType.GetTableName());
-                }
-                return string.Format("select {0} from {1} where {2} ",
-                    RootType.GetSelectClause().ToSelectClause(), RootType.GetTableName(), Filter.BuildStatement());
+                return string.Format("SELECT {0} {1} FROM {2} {3} {4} {5} {6}",
+                    SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause, OrderByClause);
             }
         }
-        internal object Parameters { get { return Filter == null ? null : Filter.BuildParameters(); } }
+
+        protected string SelectClause { get { return RootType.GetSelectClause().ToSelectClause(); } }
+        public string SelectTopClause { get; set; }
+        protected string TableClause { get { return RootType.GetTableName(); } }
+        protected string WhereClause
+        {
+            get
+            {
+                var where = string.Empty;
+                if (Filter != null)
+                {
+                    where = string.Format(" WHERE {0}", Filter.BuildStatement());
+                }
+                return where;
+            }
+        }
+        protected string OrderByClause
+        {
+            get
+            {
+                var orderBy = string.Empty;
+                if (Sorts.Any())
+                {
+                    orderBy = string.Format(" ORDER BY {0}", string.Join(",", Sorts));
+                }
+                return orderBy;
+            }
+        }
+        protected string GroupByClause
+        {
+            get
+            {
+                var groupBy = string.Empty;
+                if (Groups.Any())
+                {
+                    groupBy = string.Format(" GROUP BY {0}", string.Join(",", Groups));
+                }
+                return groupBy;
+            }
+        }
+        protected string HavingClause
+        {
+            get
+            {
+                var having = string.Empty;
+                if (Having != null)
+                {
+                    having = string.Format(" HAVING {0}", Having.BuildStatement());
+                }
+                return having;
+            }
+        }
+
+
+        internal object Parameters
+        {
+            get
+            {
+                var dic = new Dictionary<string, object>();
+                if (Filter != null)
+                {
+                    foreach (var each in Filter.BuildParameters())
+                    {
+                        dic[each.Key] = each.Value;
+                    }
+                }
+                if (Having != null)
+                {
+                    foreach (var each in Having.BuildParameters())
+                    {
+                        dic[each.Key] = each.Value;
+                    }
+                }
+                return dic.Keys.Any() ? dic : null;
+            }
+        }
         public Criteria Filter { get; set; }
-
-
-
+        protected List<string> Sorts { get; private set; }
+        protected List<string> Groups { get; private set; }
+        public Criteria Having { get; set; }
         public QueryImp Join<Parent, Child>(Expression<Func<Parent, object>> parentProperty = null, Expression<Func<Child, object>> childProperty = null)
         {
             return Join<Parent, Child>(parentProperty.ToSymbol(), childProperty.ToSymbol());
