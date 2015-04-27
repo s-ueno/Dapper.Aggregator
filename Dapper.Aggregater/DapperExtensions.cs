@@ -1421,12 +1421,20 @@ namespace Dapper.Aggregater
         }
         public override string BuildStatement()
         {
-            return string.Format(" {0} IN @p{1}", Name, Index);
+            var subP = new List<string>();
+            for (int i = 0; i < InList.Count; i++)
+            {
+                subP.Add(string.Format("@p{0}{1}", Index, i));
+            }
+            return string.Format(" {0} IN ({1})", Name, string.Join(",", subP));
         }
         public override Dictionary<string, object> BuildParameters()
         {
             var dic = new Dictionary<string, object>();
-            dic[string.Format("@p{0}", Index)] = InList;
+            for (int i = 0; i < InList.Count; i++)
+            {
+                dic[string.Format("@p{0}{1}", Index, i)] = InList[i];
+            }
             return dic;
         }
     }
