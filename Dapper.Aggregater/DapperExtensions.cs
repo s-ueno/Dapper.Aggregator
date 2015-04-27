@@ -157,7 +157,7 @@ namespace Dapper.Aggregater
         }
         static readonly ConcurrentDictionary<RuntimeTypeHandle, ColumnInfoCollection> TypeSelectClause
             = new ConcurrentDictionary<RuntimeTypeHandle, ColumnInfoCollection>();
-        private static ColumnInfoAttribute CreateColumnInfo(PropertyInfo pi)
+        internal static ColumnInfoAttribute CreateColumnInfo(this MemberInfo pi)
         {
             var ret = new ColumnInfoAttribute();
             ret.Name = pi.Name;
@@ -219,12 +219,8 @@ namespace Dapper.Aggregater
             catch { }
         }
 
-
-        internal static string ToSymbol(this Expression expr)
+        internal static ColumnInfoAttribute ToColumnInfo(this Expression expr)
         {
-            if (expr == null)
-                return null;
-
             var lambdaExp = (LambdaExpression)expr;
             var memExp = lambdaExp.Body as MemberExpression;
             if (memExp == null)
@@ -235,15 +231,14 @@ namespace Dapper.Aggregater
                     memExp = convert.Operand as MemberExpression;
                 }
             }
-
-            var list = new List<string>();
-            while (memExp is MemberExpression)
-            {
-                list.Add(memExp.Member.Name);
-                memExp = memExp.Expression as MemberExpression;
-            }
-            return string.Join(".", list.Reverse<string>());
+            return memExp.Member.CreateColumnInfo();
         }
+
+        public static TResult Count<TResult>(this IDbConnection cnn, QueryImp query)
+        {
+            return cnn.ExecuteScalar<TResult>(string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy), query.Parameters);
+        }
+
     }
 
     [AttributeUsage(AttributeTargets.Class)]
@@ -299,6 +294,7 @@ namespace Dapper.Aggregater
 
         public static bool IsInjected(Type type)
         {
+            ValidColumnTypeMap(type);
             return TypeCache.ContainsKey(type);
         }
 
@@ -322,6 +318,9 @@ namespace Dapper.Aggregater
             }
             buildType = typeBuilder.CreateType();
             TypeCache[targetType] = buildType;
+
+            ValidColumnTypeMap(targetType);
+            ValidColumnTypeMap(buildType);
             return buildType;
         }
         private static void BuildProperty(TypeBuilder typeBuilder, string name, Type type)
@@ -347,7 +346,99 @@ namespace Dapper.Aggregater
             propertyBuilder.SetGetMethod(getter);
             propertyBuilder.SetSetMethod(setter);
         }
+
+        private static void ValidColumnTypeMap(Type t)
+        {
+            if (!ColumnAttMapped.Contains(t))
+            {
+                Dapper.SqlMapper.SetTypeMap(t, new ColumnAttributeTypeMapper(t));
+                ColumnAttMapped.Add(t);
+            }
+        }
+
+        //http://stackoverflow.com/questions/8902674/manually-map-column-names-with-class-properties
+        private static readonly ConcurrentBag<Type> ColumnAttMapped = new ConcurrentBag<Type>();
+        private class ColumnAttributeTypeMapper : MultiTypeMapper
+        {
+            public ColumnAttributeTypeMapper(Type t)
+                : base(new SqlMapper.ITypeMap[]
+                {
+                    new CustomPropertyTypeMap(t, FindPropertyInfo),                       
+                    new DefaultTypeMap(t)
+                })
+            {
+            }
+            private static PropertyInfo FindPropertyInfo(Type t, string columnName)
+            {
+                try
+                {
+                    var properties = t.GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static).ToArray();
+                    foreach (var each in properties)
+                    {
+                        var atts = each.GetCustomAttributes(false).ToArray();
+                        var columnAtt = atts.SingleOrDefault(x => x.GetType().Name == "ColumnAttribute") as dynamic;
+                        if (columnAtt != null && string.Compare(columnAtt.Name, columnName, true) == 0) return each;
+                        var columnInfo = atts.OfType<ColumnInfoAttribute>().FirstOrDefault();
+                        if (columnInfo != null && string.Compare(columnInfo.Name, columnName, true) == 0) return each;
+                    }
+                }
+                catch
+                {
+                }
+                return null;
+            }
+
+        }
+        private class MultiTypeMapper : SqlMapper.ITypeMap
+        {
+            private readonly IEnumerable<SqlMapper.ITypeMap> _mappers;
+            public MultiTypeMapper(IEnumerable<SqlMapper.ITypeMap> mappers) { _mappers = mappers; }
+            public ConstructorInfo FindConstructor(string[] names, Type[] types)
+            {
+                foreach (var mapper in _mappers)
+                {
+                    try
+                    {
+                        var result = mapper.FindConstructor(names, types);
+                        if (result != null) return result;
+                    }
+                    catch (NotImplementedException) { }
+                }
+                return null;
+            }
+            public SqlMapper.IMemberMap GetConstructorParameter(ConstructorInfo constructor, string columnName)
+            {
+                foreach (var mapper in _mappers)
+                {
+                    try
+                    {
+                        var result = mapper.GetConstructorParameter(constructor, columnName);
+                        if (result != null) return result;
+                    }
+                    catch (NotImplementedException) { }
+                }
+                return null;
+            }
+            public SqlMapper.IMemberMap GetMember(string columnName)
+            {
+                foreach (var mapper in _mappers)
+                {
+                    try
+                    {
+                        var result = mapper.GetMember(columnName);
+                        if (result != null) return result;
+                    }
+                    catch (NotImplementedException) { }
+                }
+                return null;
+            }
+            public ConstructorInfo FindExplicitConstructor()
+            {
+                return _mappers.Select(mapper => mapper.FindExplicitConstructor()).FirstOrDefault(result => result != null);
+            }
+        }
     }
+
 
     public class Query<Root> : QueryImp
     {
@@ -360,19 +451,19 @@ namespace Dapper.Aggregater
 
         public Criteria Eq<P>(Expression<Func<Root, P>> property, P obj)
         {
-            return new IdCriteria(obj, property.ToSymbol(), ++CriteriaIndex);
+            return new IdCriteria(obj, property.ToColumnInfo().Name, ++CriteriaIndex);
         }
         public Criteria NotEq<P>(Expression<Func<Root, P>> property, P obj)
         {
-            return new NotCriteria(new IdCriteria(obj, property.ToSymbol(), ++CriteriaIndex));
+            return new NotCriteria(new IdCriteria(obj, property.ToColumnInfo().Name, ++CriteriaIndex));
         }
         public Criteria Between<P>(Expression<Func<Root, P>> property, P start, P end)
         {
-            return new BetweenCriteria(property.ToSymbol(), start, end, ++CriteriaIndex);
+            return new BetweenCriteria(property.ToColumnInfo().Name, start, end, ++CriteriaIndex);
         }
         public Criteria In<P>(Expression<Func<Root, P>> property, params P[] args)
         {
-            return new InCriteria(property.ToSymbol(), args.Cast<object>().ToList(), ++CriteriaIndex);
+            return new InCriteria(property.ToColumnInfo().Name, args.Cast<object>().ToList(), ++CriteriaIndex);
         }
         public Criteria Expression(string statemant, Dictionary<string, object> parameters = null)
         {
@@ -380,7 +471,7 @@ namespace Dapper.Aggregater
         }
         public Criteria Like<P>(Expression<Func<Root, P>> property, object obj, LikeCriteria.Match asterisk)
         {
-            return new LikeCriteria(property.ToSymbol(), obj, asterisk, ++CriteriaIndex);
+            return new LikeCriteria(property.ToColumnInfo().Name, obj, asterisk, ++CriteriaIndex);
         }
 
         /// <summary>
@@ -388,7 +479,7 @@ namespace Dapper.Aggregater
         /// </summary>
         public Criteria GreaterThan<P>(Expression<Func<Root, P>> property, P obj)
         {
-            return new ComparisonCriteria(property.ToSymbol(), obj,
+            return new ComparisonCriteria(property.ToColumnInfo().Name, obj,
                 ComparisonCriteria.Comparison.GreaterThan, ComparisonCriteria.Eq.Ignore, ++CriteriaIndex);
         }
         /// <summary>
@@ -396,7 +487,7 @@ namespace Dapper.Aggregater
         /// </summary>
         public Criteria GreaterThanEq<P>(Expression<Func<Root, P>> property, P obj)
         {
-            return new ComparisonCriteria(property.ToSymbol(), obj,
+            return new ComparisonCriteria(property.ToColumnInfo().Name, obj,
                 ComparisonCriteria.Comparison.GreaterThan, ComparisonCriteria.Eq.Contains, ++CriteriaIndex);
         }
         /// <summary>
@@ -404,7 +495,7 @@ namespace Dapper.Aggregater
         /// </summary>
         public Criteria LessThan<P>(Expression<Func<Root, P>> property, P obj)
         {
-            return new ComparisonCriteria(property.ToSymbol(), obj,
+            return new ComparisonCriteria(property.ToColumnInfo().Name, obj,
                 ComparisonCriteria.Comparison.LessThan, ComparisonCriteria.Eq.Ignore, ++CriteriaIndex);
         }
         /// <summary>
@@ -412,31 +503,49 @@ namespace Dapper.Aggregater
         /// </summary>
         public Criteria LessThanEq<P>(Expression<Func<Root, P>> property, P obj)
         {
-            return new ComparisonCriteria(property.ToSymbol(), obj,
+            return new ComparisonCriteria(property.ToColumnInfo().Name, obj,
                 ComparisonCriteria.Comparison.LessThan, ComparisonCriteria.Eq.Contains, ++CriteriaIndex);
         }
         public Criteria IsNull<P>(Expression<Func<Root, P>> property)
         {
-            return new ExpressionCriteria(string.Format(" {0} IS NULL ", property.ToSymbol()));
+            return new ExpressionCriteria(string.Format(" {0} IS NULL ", property.ToColumnInfo().Name));
         }
         public Criteria IsNotNull<P>(Expression<Func<Root, P>> property)
         {
-            return new ExpressionCriteria(string.Format(" {0} IS NOT NULL ", property.ToSymbol()));
+            return new ExpressionCriteria(string.Format(" {0} IS NOT NULL ", property.ToColumnInfo().Name));
         }
 
         public Query<Root> OrderBy<P>(Expression<Func<Root, P>> property)
         {
-            Sorts.Add(string.Format("{0} ASC", property.ToSymbol()));
+            Sorts.Add(string.Format("{0} ASC", property.ToColumnInfo().Name));
             return this;
         }
         public Query<Root> OrderByDesc<P>(Expression<Func<Root, P>> property)
         {
-            Sorts.Add(string.Format("{0} DESC", property.ToSymbol()));
+            Sorts.Add(string.Format("{0} DESC", property.ToColumnInfo().Name));
             return this;
         }
         public Query<Root> GroupBy<P>(Expression<Func<Root, P>> property)
         {
-            Groups.Add(property.ToSymbol());
+            Groups.Add(property.ToColumnInfo().Name);
+            return this;
+        }
+
+        public Query<Root> SelectClauses<P>(Expression<Func<Root, P>> property)
+        {
+            var lambdaExp = (LambdaExpression)property;
+            var memExp = lambdaExp.Body as MemberExpression;
+            if (memExp == null)
+            {
+                var convert = lambdaExp.Body as UnaryExpression;
+                if (convert != null)
+                {
+                    memExp = convert.Operand as MemberExpression;
+                }
+            }
+            var column = memExp.Member.CreateColumnInfo();
+            CustomSelectClauses.Add(column);
+
             return this;
         }
     }
@@ -450,6 +559,7 @@ namespace Dapper.Aggregater
             Relations = new List<RelationAttribute>();
             Sorts = new List<string>();
             Groups = new List<string>();
+            CustomSelectClauses = new ColumnInfoCollection();
         }
         public List<RelationAttribute> Relations { get; private set; }
         public Type RootType { get; protected set; }
@@ -469,8 +579,25 @@ namespace Dapper.Aggregater
                     SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause);
             }
         }
+        protected string SelectClause
+        {
+            get
+            {
+                var selectClause = string.Empty;
+                if (CustomSelectClauses.Any())
+                {
+                    selectClause = CustomSelectClauses.ToSelectClause();
+                }
+                else
+                {
+                    selectClause = RootType.GetSelectClause().ToSelectClause();
+                }
+                return selectClause;
+            }
+        }
+        internal ColumnInfoCollection CustomSelectClauses { get; set; }
 
-        protected string SelectClause { get { return RootType.GetSelectClause().ToSelectClause(); } }
+
         public string SelectTopClause { get; set; }
         protected string TableClause { get { return RootType.GetTableName(); } }
         protected string WhereClause
@@ -551,7 +678,7 @@ namespace Dapper.Aggregater
         public Criteria Having { get; set; }
         public QueryImp Join<Parent, Child>(Expression<Func<Parent, object>> parentProperty = null, Expression<Func<Child, object>> childProperty = null)
         {
-            return Join<Parent, Child>(parentProperty.ToSymbol(), childProperty.ToSymbol());
+            return Join<Parent, Child>(parentProperty.ToColumnInfo().Name, childProperty.ToColumnInfo().Name);
         }
         public QueryImp Join<Parent, Child>(string parentPropertyName, string childPropertyName)
         {
@@ -562,7 +689,7 @@ namespace Dapper.Aggregater
 
         public QueryImp Join<Parent, Child>(string key, Expression<Func<Parent, object>> parentProperty = null, Expression<Func<Child, object>> childProperty = null)
         {
-            return Join<Parent, Child>(key, parentProperty.ToSymbol(), childProperty.ToSymbol());
+            return Join<Parent, Child>(key, parentProperty.ToColumnInfo().Name, childProperty.ToColumnInfo().Name);
         }
         public QueryImp Join<Parent, Child>(string key, string parentPropertyName, string childPropertyName)
         {
@@ -574,8 +701,8 @@ namespace Dapper.Aggregater
         public QueryImp Join<Parent, Child>(Expression<Func<Parent, object>>[] parentProperties = null, Expression<Func<Child, object>>[] childProperties = null)
         {
             return Join<Parent, Child>(
-                parentProperties.Select(x => x.ToSymbol()).ToArray(),
-                childProperties.Select(x => x.ToSymbol()).ToArray());
+                parentProperties.Select(x => x.ToColumnInfo().Name).ToArray(),
+                childProperties.Select(x => x.ToColumnInfo().Name).ToArray());
         }
         public QueryImp Join<Parent, Child>(string[] parentPropertyNames, string[] childPropertyNames)
         {
@@ -587,8 +714,8 @@ namespace Dapper.Aggregater
         {
             return Join<Parent, Child>(
                 key,
-                parentProperties.Select(x => x.ToSymbol()).ToArray(),
-                childProperties.Select(x => x.ToSymbol()).ToArray());
+                parentProperties.Select(x => x.ToColumnInfo().Name).ToArray(),
+                childProperties.Select(x => x.ToColumnInfo().Name).ToArray());
         }
         public QueryImp Join<Parent, Child>(string key, string[] parentPropertyNames, string[] childPropertyNames)
         {
