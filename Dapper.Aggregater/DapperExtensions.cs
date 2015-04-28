@@ -18,10 +18,15 @@ namespace Dapper.Aggregater
         public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, Query<T> query,
             IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 10)
         {
+            return cnn.QueryWith(query as QueryImp, transaction, buffered, commandTimeout, commandType, splitLength, queryOptimizerLevel).OfType<T>();
+        }
+        public static IEnumerable<object> QueryWith(this IDbConnection cnn, QueryImp query,
+            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 10)
+        {
             foreach (var each in query.Relations)
             {
                 if (each.ParentType == null)
-                    each.ParentType = typeof(T);
+                    each.ParentType = query.RootType;
 
                 each.Ensure();
                 each.EnsureDynamicType();
@@ -29,17 +34,17 @@ namespace Dapper.Aggregater
                 each.DataAdapter.QueryOptimizerLevel = queryOptimizerLevel;
             }
 
-            var oldType = typeof(T);
+            var oldType = query.RootType;
             var newParentType = ILGeneratorUtil.IsInjected(oldType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(oldType) : oldType;
 
             var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout, commandType);
-            if (rows == null || !rows.Any()) return new T[] { };
-
-            var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
-            LoadWith(cnn, command, newParentType, query.Relations.ToArray(), rows);
-            return rows.Cast<T>();
+            if (rows != null && rows.Any())
+            {
+                var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
+                LoadWith(cnn, command, newParentType, query.Relations.ToArray(), rows);
+            }
+            return rows;
         }
-
 
         ////Implement IContainerHolder Interface pattern
         //// all typesafe.
@@ -219,7 +224,7 @@ namespace Dapper.Aggregater
             catch { }
         }
 
-        internal static ColumnInfoAttribute ToColumnInfo(this Expression expr)
+        public static ColumnInfoAttribute ToColumnInfo(this Expression expr)
         {
             var lambdaExp = (LambdaExpression)expr;
             var memExp = lambdaExp.Body as MemberExpression;
