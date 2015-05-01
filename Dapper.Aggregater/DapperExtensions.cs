@@ -162,13 +162,13 @@ namespace Dapper.Aggregater
         }
         static readonly ConcurrentDictionary<RuntimeTypeHandle, ColumnInfoCollection> TypeSelectClause
             = new ConcurrentDictionary<RuntimeTypeHandle, ColumnInfoCollection>();
-        internal static ColumnInfoAttribute CreateColumnInfo(this MemberInfo pi)
+        internal static ColumnAttribute CreateColumnInfo(this MemberInfo pi)
         {
-            var ret = new ColumnInfoAttribute();
+            var ret = new ColumnAttribute();
             ret.Name = pi.Name;
 
             var allAtts = pi.GetCustomAttributes(false).ToArray();
-            var cInfo = allAtts.OfType<ColumnInfoAttribute>().FirstOrDefault();
+            var cInfo = allAtts.OfType<ColumnAttribute>().FirstOrDefault();
             if (cInfo != null)
                 return cInfo;
 
@@ -190,7 +190,7 @@ namespace Dapper.Aggregater
             }
             return ret;
         }
-        private static void SetColumnInfoFromColumnAttribute(ColumnInfoAttribute info, dynamic att)
+        private static void SetColumnInfoFromColumnAttribute(ColumnAttribute info, dynamic att)
         {
             if (att == null) return;
             try
@@ -224,7 +224,7 @@ namespace Dapper.Aggregater
             catch { }
         }
 
-        public static ColumnInfoAttribute ToColumnInfo(this Expression expr)
+        public static ColumnAttribute ToColumnInfo(this Expression expr)
         {
             var lambdaExp = (LambdaExpression)expr;
             var memExp = lambdaExp.Body as MemberExpression;
@@ -253,10 +253,10 @@ namespace Dapper.Aggregater
         {
             Name = tableName;
         }
-        public string Name { get; private set; }
+        public string Name { get; set; }
     }
     [AttributeUsage(AttributeTargets.Property)]
-    public class ColumnInfoAttribute : Attribute
+    public class ColumnAttribute : Attribute
     {
         public string Name { get; set; }
         public string Expression { get; set; }
@@ -266,7 +266,7 @@ namespace Dapper.Aggregater
         public string DbType { get; set; }
         public bool CanBeNull { get; set; }
     }
-    internal class ColumnInfoCollection : List<ColumnInfoAttribute>
+    internal class ColumnInfoCollection : List<ColumnAttribute>
     {
         public string ToSelectClause()
         {
@@ -384,7 +384,7 @@ namespace Dapper.Aggregater
                         var atts = each.GetCustomAttributes(false).ToArray();
                         var columnAtt = atts.SingleOrDefault(x => x.GetType().Name == "ColumnAttribute") as dynamic;
                         if (columnAtt != null && string.Compare(columnAtt.Name, columnName, true) == 0) return each;
-                        var columnInfo = atts.OfType<ColumnInfoAttribute>().FirstOrDefault();
+                        var columnInfo = atts.OfType<ColumnAttribute>().FirstOrDefault();
                         if (columnInfo != null && string.Compare(columnInfo.Name, columnName, true) == 0) return each;
                     }
                 }
