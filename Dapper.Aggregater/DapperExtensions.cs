@@ -264,6 +264,7 @@ namespace Dapper.Aggregater
         public bool IsVersion { get; set; }
         public bool Ignore { get; set; }
         public string DbType { get; set; }
+        public bool CanBeNull { get; set; }
     }
     internal class ColumnInfoCollection : List<ColumnInfoAttribute>
     {
@@ -1075,7 +1076,7 @@ namespace Dapper.Aggregater
         static ConcurrentDictionary<int, List<object>> hashDic = new ConcurrentDictionary<int, List<object>>();
         private class ValueEqualityComparer : IEqualityComparer<object>
         {
-            public bool Equals(object x, object y)
+            new public bool Equals(object x, object y)
             {
                 if (x == null)
                 {
@@ -1089,7 +1090,6 @@ namespace Dapper.Aggregater
                 return obj.GetHashCode();
             }
         }
-
     }
 
     [Serializable]
