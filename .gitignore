@@ -3,9 +3,8 @@ Dapper.Aggregater.v12.suo
 *.dll
 *.xml
 *.cache
-*.txt
 *.exe
-Dapper.Aggregater.SampleConsoleApp/bin/Debug/Dapper.Aggregater.SampleConsoleApp.exe.config
-Dapper.Aggregater.SampleConsoleApp/bin/Debug/Dapper.Aggregater.SampleConsoleApp.vshost.exe.config
+Dapper.Aggregater.SampleConsoleApp/bin/*
+Dapper.Aggregater.SampleConsoleApp/obj/*
+Dapper.Aggregater/obj/*
 Dapper.Aggregater/DapperExtensions.cs~RF217514e3.TMP
-Dapper.Aggregater.SampleConsoleApp/bin/Debug/Dapper.Aggregater.SampleConsoleApp.vshost.exe.manifest
