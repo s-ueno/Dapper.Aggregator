@@ -16,67 +16,26 @@ namespace Dapper.Aggregater
         //poco pattern
         // If the class does not implement interface(IContainerHolder), I embed interface dynamically using TypeBuilder.
         public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, Query<T> query,
-            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 10)
+            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, int splitLength = 100, int queryOptimizerLevel = 10)
         {
-            return cnn.QueryWith(query as QueryImp, transaction, buffered, commandTimeout, commandType, splitLength, queryOptimizerLevel).OfType<T>();
+            return cnn.QueryWith(query as QueryImp, transaction, buffered, commandTimeout, splitLength, queryOptimizerLevel).OfType<T>();
         }
         public static IEnumerable<object> QueryWith(this IDbConnection cnn, QueryImp query,
-            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 10)
+            IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, int splitLength = 100, int queryOptimizerLevel = 10)
         {
-            foreach (var each in query.Relations)
-            {
-                if (each.ParentType == null)
-                    each.ParentType = query.RootType;
-
-                each.Ensure();
-                each.EnsureDynamicType();
-                each.DataAdapter.SplitCount = splitLength;
-                each.DataAdapter.QueryOptimizerLevel = queryOptimizerLevel;
-            }
+            query.Ensure(splitLength, queryOptimizerLevel);
 
             var oldType = query.RootType;
             var newParentType = ILGeneratorUtil.IsInjected(oldType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(oldType) : oldType;
 
-            var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout, commandType);
+            var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout);
             if (rows != null && rows.Any())
             {
-                var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
+                var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, commandTimeout, null, buffered ? CommandFlags.Buffered : CommandFlags.None);
                 LoadWith(cnn, command, newParentType, query.Relations.ToArray(), rows);
             }
             return rows;
         }
-
-        ////Implement IContainerHolder Interface pattern
-        //// all typesafe.
-        //public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, string sql, object param = null,
-        //    IDbTransaction transaction = null, bool buffered = true, int? commandTimeout = null, CommandType? commandType = null, int splitLength = 100, int queryOptimizerLevel = 100) where T : IContainerHolder
-        //{
-        //    var command = new CommandDefinition(sql, param, transaction, commandTimeout, commandType, buffered ? CommandFlags.Buffered : CommandFlags.None);
-        //    return QueryWith<T>(cnn, command, splitLength, queryOptimizerLevel);
-        //}
-        //public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, CommandDefinition command, int splitLength = 100, int queryOptimizerLevel = 100) where T : IContainerHolder
-        //{
-        //    var atts = typeof(T).GetCustomAttributes(typeof(RelationAttribute), true).OfType<RelationAttribute>().ToArray();
-        //    if (!atts.Any())
-        //        throw new InvalidOperationException("QueryWith is function to use DataRelationAttribute.");
-
-        //    var rows = cnn.Query<T>(command);
-        //    if (rows == null || !rows.Any()) return new T[] { };
-
-        //    foreach (var each in atts)
-        //    {
-        //        if (each.ParentType == null)
-        //            each.ParentType = typeof(T);
-
-        //        each.Ensure();
-        //        each.DataAdapter.SplitCount = splitLength;
-        //        each.DataAdapter.QueryOptimizerLevel = queryOptimizerLevel;
-        //    }
-
-        //    LoadWith(cnn, command, typeof(T), atts, rows);
-
-        //    return rows;
-        //}
 
         private static void LoadWith(IDbConnection cnn, CommandDefinition command, Type t, RelationAttribute[] atts, System.Collections.IEnumerable roots)
         {
@@ -112,8 +71,50 @@ namespace Dapper.Aggregater
                 }
             }
         }
-
-
+        public static int UpdateQuery<T>(this IDbConnection cnn, UpdateQuery<T> query,
+            IDbTransaction transaction = null, int? commandTimeout = null)
+        {
+            return cnn.Execute(query.UpdateClauses, query.Parameters, transaction, commandTimeout);
+        }
+        public static int DeleteQuery<T>(this IDbConnection cnn, Query<T> query,
+            IDbTransaction transaction = null, int? commandTimeout = null, bool isRootOnly = true)
+        {
+            if (!isRootOnly)
+            {
+                query.Ensure(injectionDynamicType: false);
+                var rootType = typeof(T);
+                var rootView = string.Format("SELECT {0} FROM {1} {2}", query.SelectClause, query.TableClause, query.WhereClause);
+                var atts = query.Relations.ToList();
+                var list = new List<DeleteQueryObject>();
+                foreach (var each in query.Relations)
+                {
+                    if (each.ParentType == typeof(T))
+                    {
+                        atts.Remove(each);
+                        RecursiveDeleteQuery(atts, list, new DeleteQueryObject(each, rootView, 0));
+                    }
+                }
+                foreach (var each in list.OrderByDescending(x => x.NestLevel))
+                {
+                    cnn.Execute(each.DeleteClause, query.Parameters, transaction, commandTimeout);
+                }
+            }
+            var rootDeleteSql = string.Format("DELETE FROM {0} {1}", query.TableClause, query.WhereClause);
+            return cnn.Execute(rootDeleteSql, query.Parameters, transaction, commandTimeout);
+        }
+        private static void RecursiveDeleteQuery(List<RelationAttribute> atts, List<DeleteQueryObject> items, DeleteQueryObject rd)
+        {
+            items.Add(rd);
+            var arr = atts.ToArray();
+            foreach (var each in arr)
+            {
+                if (each.ParentType == rd.Criteria.Att.ChildType)
+                {
+                    atts.Remove(each);
+                    RecursiveDeleteQuery(atts, items, new DeleteQueryObject(each, rd.View, rd.NestLevel + 1));
+                }
+            }
+        }
         //Dapper.Contrib
         internal static string GetTableName(this Type type)
         {
@@ -446,6 +447,51 @@ namespace Dapper.Aggregater
     }
 
 
+    public class UpdateQuery<T> : Query<T>
+    {
+        private class SetClausesHolder
+        {
+            public SetClausesHolder(string setClauses, object value, int index)
+            {
+                SetClauses = setClauses;
+                Value = value;
+                Index = index;
+            }
+            public string SetClauses { get; private set; }
+            public object Value { get; private set; }
+            public int Index { get; private set; }
+            internal string Placeholder { get { return string.Format("@{0}{1}", SetClauses, Index); } }
+            internal string Clauses { get { return string.Format("{0} = {1}", SetClauses, Placeholder); } }
+        }
+        public UpdateQuery<T> Set<P>(Expression<Func<T, P>> property, P obj)
+        {
+            setClauses.Add(new SetClausesHolder(property.ToColumnInfo().Name, obj, ++CriteriaIndex));
+            return this;
+        }
+        private List<SetClausesHolder> setClauses = new List<SetClausesHolder>();
+        internal protected virtual string UpdateClauses
+        {
+            get
+            {
+                var ret = string.Format("UPDATE {0} SET {1} {2}", TableClause, string.Join(",", setClauses.Select(x => x.Clauses)), WhereClause);
+                return ret;
+            }
+        }
+        protected internal override Dictionary<string, object> Parameters
+        {
+            get
+            {
+                var dic = base.Parameters ?? new Dictionary<string, object>();
+                foreach (var each in setClauses)
+                {
+                    dic[each.Placeholder] = each.Value;
+                }
+                return dic;
+            }
+        }
+    }
+
+
     public class Query<Root> : QueryImp
     {
         public Query()
@@ -558,8 +604,12 @@ namespace Dapper.Aggregater
 
     public abstract class QueryImp
     {
-        internal int CriteriaIndex { get; set; }
+        internal protected Type RootType { get; protected set; }
+        internal protected int CriteriaIndex { get; set; }
 
+        public List<RelationAttribute> Relations { get; private set; }
+        protected List<string> Sorts { get; private set; }
+        protected List<string> Groups { get; private set; }
         public QueryImp()
         {
             Relations = new List<RelationAttribute>();
@@ -567,9 +617,7 @@ namespace Dapper.Aggregater
             Groups = new List<string>();
             CustomSelectClauses = new ColumnInfoCollection();
         }
-        public List<RelationAttribute> Relations { get; private set; }
-        public Type RootType { get; protected set; }
-        public string Sql
+        public virtual string Sql
         {
             get
             {
@@ -577,7 +625,7 @@ namespace Dapper.Aggregater
                     SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause, OrderByClause);
             }
         }
-        public string SqlIgnoreOrderBy
+        public virtual string SqlIgnoreOrderBy
         {
             get
             {
@@ -585,7 +633,7 @@ namespace Dapper.Aggregater
                     SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause);
             }
         }
-        protected string SelectClause
+        internal protected virtual string SelectClause
         {
             get
             {
@@ -605,8 +653,8 @@ namespace Dapper.Aggregater
 
 
         public string SelectTopClause { get; set; }
-        protected string TableClause { get { return RootType.GetTableName(); } }
-        protected string WhereClause
+        internal protected virtual string TableClause { get { return RootType.GetTableName(); } }
+        internal protected virtual string WhereClause
         {
             get
             {
@@ -618,7 +666,7 @@ namespace Dapper.Aggregater
                 return where;
             }
         }
-        protected string OrderByClause
+        internal protected virtual string OrderByClause
         {
             get
             {
@@ -630,7 +678,7 @@ namespace Dapper.Aggregater
                 return orderBy;
             }
         }
-        protected string GroupByClause
+        internal protected virtual string GroupByClause
         {
             get
             {
@@ -642,7 +690,7 @@ namespace Dapper.Aggregater
                 return groupBy;
             }
         }
-        protected string HavingClause
+        internal protected virtual string HavingClause
         {
             get
             {
@@ -655,8 +703,7 @@ namespace Dapper.Aggregater
             }
         }
 
-
-        internal object Parameters
+        internal protected virtual Dictionary<string, object> Parameters
         {
             get
             {
@@ -679,8 +726,6 @@ namespace Dapper.Aggregater
             }
         }
         public Criteria Filter { get; set; }
-        protected List<string> Sorts { get; private set; }
-        protected List<string> Groups { get; private set; }
         public Criteria Having { get; set; }
         public QueryImp Join<Parent, Child>(Expression<Func<Parent, object>> parentProperty = null, Expression<Func<Child, object>> childProperty = null)
         {
@@ -729,9 +774,20 @@ namespace Dapper.Aggregater
             return this;
         }
 
+        public void Ensure(int splitCount = 100, int optimizerLevel = 10, bool injectionDynamicType = true)
+        {
+            foreach (var each in Relations)
+            {
+                if (each.ParentType == null)
+                    each.ParentType = RootType;
 
-
-
+                each.Ensure();
+                if (injectionDynamicType)
+                    each.EnsureDynamicType();
+                each.DataAdapter.SplitCount = splitCount;
+                each.DataAdapter.QueryOptimizerLevel = optimizerLevel;
+            }
+        }
 
     }
 
@@ -1497,5 +1553,30 @@ namespace Dapper.Aggregater
     }
 
     #endregion
+
+    internal class DeleteQueryObject
+    {
+        public DeleteQueryObject(RelationAttribute att, string view, int nestLevel)
+        {
+            this.Criteria = new NestCriteria(att) { View = view };
+            NestLevel = nestLevel;
+        }
+        public NestCriteria Criteria { get; set; }
+        public int NestLevel { get; set; }
+        public string DeleteClause
+        {
+            get
+            {
+                return string.Format("DELETE FROM {0} WHERE {1}", Criteria.Att.ChildTableName, Criteria.BuildStatement());
+            }
+        }
+        public string View
+        {
+            get
+            {
+                return string.Format("SELECT {0} FROM {1} WHERE {2}", Criteria.Att.ChildType.GetSelectClause().ToSelectClause(), Criteria.Att.ChildTableName, Criteria.BuildStatement());
+            }
+        }
+    }
 
 }

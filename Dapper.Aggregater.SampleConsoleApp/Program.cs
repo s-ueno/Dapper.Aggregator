@@ -16,6 +16,9 @@ namespace Dapper.Aggregater.SampleConsoleApp
         {
             TransAction(AggregateWithPoco);
             TransAction(DefinedAggregatePattern);
+
+            TransAction(UpdateQuery);
+            TransAction(DeleteQuery);
         }
 
         private static void AggregateWithPoco(IDbConnection sqlMapper)
@@ -44,8 +47,8 @@ namespace Dapper.Aggregater.SampleConsoleApp
                  .OrderByDesc(x => x.EventTitle);
 
             //debug statement
-            Trace.TraceInformation(query.Filter.BuildStatement());
-            Trace.TraceInformation(query.Sql);
+            //Trace.TraceInformation(query.Filter.BuildStatement());
+            //Trace.TraceInformation(query.Sql);
 
 
             //nest query pattern(performance)
@@ -76,10 +79,35 @@ namespace Dapper.Aggregater.SampleConsoleApp
                 {
                     foreach (var item in (detail as IContainerHolder).Container.GetChildren<CodeTable>())
                     {
-                        
+
                     }
                 }
             }
+        }
+
+        private static void UpdateQuery(IDbConnection sqlMapper)
+        {
+            var query = new UpdateQuery<EventTable>();
+
+            query.Set(x => x.EventTime, DateTime.Now);
+
+            query.Filter = (query.Eq(x => x.EventTableID, 0) | query.Eq(x => x.EventTableID, 1));
+            query.Filter &= query.IsNotNull(x => x.EventTableID);
+            query.Filter &= query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
+
+            var ret = sqlMapper.UpdateQuery(query);
+
+        }
+
+        private static void DeleteQuery(IDbConnection sqlMapper)
+        {
+            var query = new Query<DefinedAggregate>();
+
+            query.Filter = query.Eq(x => x.EventTableID, 99);
+            query.Filter &= query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
+
+            // tracing the relationship, and delete it from the child.
+            var ret = sqlMapper.DeleteQuery(query, isRootOnly: false);
         }
 
 
