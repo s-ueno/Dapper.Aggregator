@@ -47,7 +47,6 @@ namespace Dapper.Aggregater.SampleConsoleApp
                  .OrderByDesc(x => x.EventTitle);
 
             //debug statement
-            //Trace.TraceInformation(query.Filter.BuildStatement());
             //Trace.TraceInformation(query.Sql);
 
 

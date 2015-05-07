@@ -116,7 +116,7 @@ namespace Dapper.Aggregater
             }
         }
         //Dapper.Contrib
-        internal static string GetTableName(this Type type)
+        public static string GetTableName(this Type type)
         {
             string name;
             if (!TypeTableName.TryGetValue(type.TypeHandle, out name))
@@ -143,7 +143,7 @@ namespace Dapper.Aggregater
         }
         static readonly ConcurrentDictionary<RuntimeTypeHandle, string> TypeTableName = new ConcurrentDictionary<RuntimeTypeHandle, string>();
 
-        internal static ColumnInfoCollection GetSelectClause(this Type type)
+        public static ColumnInfoCollection GetSelectClause(this Type type)
         {
             ColumnInfoCollection clause = null;
             if (!TypeSelectClause.TryGetValue(type.TypeHandle, out clause))
@@ -167,11 +167,15 @@ namespace Dapper.Aggregater
         {
             var ret = new ColumnAttribute();
             ret.Name = pi.Name;
+            ret.PropertyInfoName = pi.Name;
 
             var allAtts = pi.GetCustomAttributes(false).ToArray();
             var cInfo = allAtts.OfType<ColumnAttribute>().FirstOrDefault();
             if (cInfo != null)
+            {
+                cInfo.PropertyInfoName = pi.Name;
                 return cInfo;
+            }
 
             //recommend  System.Data.Linq.Mapping.ColumnAttribute. but It should be only Name property.
             var columnAtt = allAtts.SingleOrDefault(x => x.GetType().Name == "ColumnAttribute") as dynamic;
@@ -245,6 +249,154 @@ namespace Dapper.Aggregater
             return cnn.ExecuteScalar<TResult>(string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy), query.Parameters);
         }
 
+        public static void InsertEntity<T>(this IDbConnection cnn, T entity, IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
+        {
+            InsertEntity(cnn, (new T[] { entity }) as IEnumerable<T>, transaction, commandTimeout);
+        }
+        public static void InsertEntity<T>(this IDbConnection cnn, IEnumerable<T> entities,
+            IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
+        {
+            var rootType = typeof(T);
+            var table = rootType.GetTableName();
+            var columns = rootType.GetSelectClause();
+            var accessors = PropertyAccessorImp.ToPropertyAccessors(rootType).ToDictionary(x => x.Name);
+            var validators = AttributeUtil.Find<EntityValidateAttribute>(rootType);
+            foreach (var each in entities)
+            {
+                var hasError = false;
+                foreach (var validator in validators)
+                {
+                    var result = validator.GetError(each);
+                    if (result != null)
+                    {
+                        if (throwValidateError)
+                        {
+                            throw result;
+                        }
+                        hasError = true;
+                        break;
+                    }
+                }
+                if (hasError) continue;
+
+                var dic = new Dictionary<string, object>();
+                foreach (var column in columns)
+                {
+                    if (column.Ignore) continue;
+                    dic[string.Format("@{0}", column.PropertyInfoName)] = accessors[column.PropertyInfoName].GetValue(each);
+                }
+                var sql = string.Format("INSERT INTO {0} ({1}) VALUES ({2});", table, string.Join(",", columns.Select(x => x.Name)), string.Join(",", dic.Keys));
+                cnn.Execute(sql, dic, transaction, commandTimeout);
+
+            }
+        }
+
+        public static void UpdateEntity<T>(this IDbConnection cnn, IEnumerable<T> entities,
+            IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
+        {
+            var rootType = typeof(T);
+            var table = rootType.GetTableName();
+            var columns = rootType.GetSelectClause();
+            if (!columns.Any(x => x.IsPrimaryKey))
+                throw new System.Data.MissingPrimaryKeyException("should have a primary key.");
+
+            var accessors = PropertyAccessorImp.ToPropertyAccessors(rootType).ToDictionary(x => x.Name);
+            var validators = AttributeUtil.Find<EntityValidateAttribute>(rootType);
+            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(rootType);
+            foreach (var each in entities)
+            {
+                var hasError = false;
+                foreach (var validator in validators)
+                {
+                    var result = validator.GetError(each);
+                    if (result != null)
+                    {
+                        if (throwValidateError)
+                        {
+                            throw result;
+                        }
+                        hasError = true;
+                        break;
+                    }
+                }
+                if (hasError) continue;
+
+                var dic = new Dictionary<string, object>();
+                var setList = new List<SetClausesHolder>();
+                var index = 0;
+                foreach (var column in columns.Where(x => !x.IsPrimaryKey && !x.Ignore))
+                {
+                    var value = accessors[column.PropertyInfoName].GetValue(each);
+                    if (column.IsVersion)
+                    {
+                        foreach (var policy in versionPolicy)
+                        {
+                            value = policy.Generate(value);
+                        }
+                    }
+
+                    var setClauses = new SetClausesHolder(column.Name, value, ++index);
+                    dic[setClauses.Placeholder] = setClauses.Value;
+                    setList.Add(setClauses);
+                }
+                var whereList = new List<SetClausesHolder>();
+                foreach (var column in columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore))
+                {
+                    var whereClauses = new SetClausesHolder(column.Name, accessors[column.PropertyInfoName].GetValue(each), ++index);
+                    dic[whereClauses.Placeholder] = whereClauses.Value;
+                    whereList.Add(whereClauses);
+                }
+
+                var sql = string.Format("UPDATE {0} SET {1} WHERE {2}", table,
+                            string.Join(",", setList.Select(x => x.Clauses)),
+                            string.Join(" AND ", whereList.Select(x => x.Clauses)));
+                var count = cnn.Execute(sql, dic, transaction, commandTimeout);
+                if (count != 1)
+                    throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+
+            }
+        }
+    }
+
+    //Cache
+    internal static class AttributeUtil
+    {
+        internal static IEnumerable<T> Find<T>(Type t) where T : Attribute
+        {
+            var list = new List<Attribute>();
+            if (!dic.TryGetValue(t, out list))
+            {
+                dic[t] = list = t.GetCustomAttributes(true).OfType<Attribute>().ToList();
+            }
+            return list.OfType<T>();
+        }
+        private static ConcurrentDictionary<Type, List<Attribute>> dic = new ConcurrentDictionary<Type, List<Attribute>>();
+    }
+
+    [Serializable]
+    public abstract class VersionPolicyAttribute : Attribute
+    {
+        public abstract object Generate(object currentVersionValue);
+    }
+
+    [Serializable]
+    public abstract class EntityValidateAttribute : Attribute
+    {
+        internal Exception GetError(object entity)
+        {
+            Exception ret = null;
+            try
+            {
+                Valid(entity);
+            }
+            catch (Exception ex)
+            {
+                ret = new Exception("Validation Error.", ex);
+                Trace.TraceWarning(string.Format("validation error. refer to the inner exception. {0}", ex.Message));
+            }
+            return ret;
+        }
+        public abstract void Valid(object entity);
     }
 
     [AttributeUsage(AttributeTargets.Class)]
@@ -260,6 +412,7 @@ namespace Dapper.Aggregater
     public class ColumnAttribute : Attribute
     {
         public string Name { get; set; }
+        public string PropertyInfoName { get; set; }
         public string Expression { get; set; }
         public bool IsPrimaryKey { get; set; }
         public bool IsVersion { get; set; }
@@ -267,7 +420,7 @@ namespace Dapper.Aggregater
         public string DbType { get; set; }
         public bool CanBeNull { get; set; }
     }
-    internal class ColumnInfoCollection : List<ColumnAttribute>
+    public class ColumnInfoCollection : List<ColumnAttribute>
     {
         public string ToSelectClause()
         {
@@ -447,22 +600,22 @@ namespace Dapper.Aggregater
     }
 
 
+    internal class SetClausesHolder
+    {
+        public SetClausesHolder(string setClauses, object value, int index = 0)
+        {
+            SetClauses = setClauses;
+            Value = value;
+            Index = index;
+        }
+        public string SetClauses { get; private set; }
+        public object Value { get; private set; }
+        public int Index { get; private set; }
+        internal string Placeholder { get { return string.Format("@{0}{1}", SetClauses, Index); } }
+        internal string Clauses { get { return string.Format("{0} = {1}", SetClauses, Placeholder); } }
+    }
     public class UpdateQuery<T> : Query<T>
     {
-        private class SetClausesHolder
-        {
-            public SetClausesHolder(string setClauses, object value, int index)
-            {
-                SetClauses = setClauses;
-                Value = value;
-                Index = index;
-            }
-            public string SetClauses { get; private set; }
-            public object Value { get; private set; }
-            public int Index { get; private set; }
-            internal string Placeholder { get { return string.Format("@{0}{1}", SetClauses, Index); } }
-            internal string Clauses { get { return string.Format("{0} = {1}", SetClauses, Placeholder); } }
-        }
         public UpdateQuery<T> Set<P>(Expression<Func<T, P>> property, P obj)
         {
             setClauses.Add(new SetClausesHolder(property.ToColumnInfo().Name, obj, ++CriteriaIndex));
@@ -729,7 +882,7 @@ namespace Dapper.Aggregater
         public Criteria Having { get; set; }
         public QueryImp Join<Parent, Child>(Expression<Func<Parent, object>> parentProperty = null, Expression<Func<Child, object>> childProperty = null)
         {
-            return Join<Parent, Child>(parentProperty.ToColumnInfo().Name, childProperty.ToColumnInfo().Name);
+            return Join<Parent, Child>(parentProperty.ToColumnInfo().PropertyInfoName, childProperty.ToColumnInfo().PropertyInfoName);
         }
         public QueryImp Join<Parent, Child>(string parentPropertyName, string childPropertyName)
         {
@@ -740,7 +893,7 @@ namespace Dapper.Aggregater
 
         public QueryImp Join<Parent, Child>(string key, Expression<Func<Parent, object>> parentProperty = null, Expression<Func<Child, object>> childProperty = null)
         {
-            return Join<Parent, Child>(key, parentProperty.ToColumnInfo().Name, childProperty.ToColumnInfo().Name);
+            return Join<Parent, Child>(key, parentProperty.ToColumnInfo().PropertyInfoName, childProperty.ToColumnInfo().PropertyInfoName);
         }
         public QueryImp Join<Parent, Child>(string key, string parentPropertyName, string childPropertyName)
         {
@@ -752,8 +905,8 @@ namespace Dapper.Aggregater
         public QueryImp Join<Parent, Child>(Expression<Func<Parent, object>>[] parentProperties = null, Expression<Func<Child, object>>[] childProperties = null)
         {
             return Join<Parent, Child>(
-                parentProperties.Select(x => x.ToColumnInfo().Name).ToArray(),
-                childProperties.Select(x => x.ToColumnInfo().Name).ToArray());
+                parentProperties.Select(x => x.ToColumnInfo().PropertyInfoName).ToArray(),
+                childProperties.Select(x => x.ToColumnInfo().PropertyInfoName).ToArray());
         }
         public QueryImp Join<Parent, Child>(string[] parentPropertyNames, string[] childPropertyNames)
         {
@@ -765,8 +918,8 @@ namespace Dapper.Aggregater
         {
             return Join<Parent, Child>(
                 key,
-                parentProperties.Select(x => x.ToColumnInfo().Name).ToArray(),
-                childProperties.Select(x => x.ToColumnInfo().Name).ToArray());
+                parentProperties.Select(x => x.ToColumnInfo().PropertyInfoName).ToArray(),
+                childProperties.Select(x => x.ToColumnInfo().PropertyInfoName).ToArray());
         }
         public QueryImp Join<Parent, Child>(string key, string[] parentPropertyNames, string[] childPropertyNames)
         {
@@ -824,12 +977,13 @@ namespace Dapper.Aggregater
         }
 
         List<Criteria> childCriteriaList = new List<Criteria>();
+        int idIndex = 0;
         public void AssignDataParameter(object value)
         {
             var list = new List<Criteria>();
             foreach (var each in dataParameter)
             {
-                list.Add(each.CreateIdCriteria(value));
+                list.Add(each.CreateIdCriteria(value, ++idIndex));
             }
 
             if (list.Count == 1)
@@ -950,6 +1104,8 @@ namespace Dapper.Aggregater
 
     internal abstract class PropertyAccessorImp
     {
+        public ColumnAttribute Att { get; set; }
+        public string Name { get; set; }
         public abstract object GetValue(object obj);
         public static PropertyAccessorImp ToAccessor(PropertyInfo pi)
         {
@@ -957,8 +1113,31 @@ namespace Dapper.Aggregater
             var getter = Delegate.CreateDelegate(getterDelegateType, pi.GetGetMethod(true));
             var accessorType = typeof(PropertyInfoProvider<,>).MakeGenericType(pi.DeclaringType, pi.PropertyType);
             var provider = (PropertyAccessorImp)Activator.CreateInstance(accessorType, getter);
+            provider.Name = pi.Name;
+            provider.Att = pi.CreateColumnInfo();
             return provider;
         }
+
+        public static IEnumerable<PropertyAccessorImp> ToPropertyAccessors(Type t)
+        {
+            List<PropertyAccessorImp> result;
+            if (!dic.TryGetValue(t, out result))
+            {
+                var list = t.GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static)
+                            .Where(x => x.CanRead)
+                            .Select(x =>
+                            {
+                                var accessor = ToAccessor(x);
+                                accessor.Att = x.CreateColumnInfo();
+                                return accessor;
+                            })
+                            .ToList();
+                result = dic[t] = list;
+            }
+            return result;
+        }
+        private static ConcurrentDictionary<Type, List<PropertyAccessorImp>> dic = new ConcurrentDictionary<Type, List<PropertyAccessorImp>>();
+
     }
     internal class PropertyInfoProvider<TTarget, TProperty> : PropertyAccessorImp
     {
@@ -979,16 +1158,15 @@ namespace Dapper.Aggregater
     {
         public string TargetName { get; private set; }
         PropertyAccessorImp acc;
-        int index;
         public DapperDataParameter(string target, PropertyAccessorImp pi)
         {
             this.TargetName = target;
             this.acc = pi;
         }
 
-        public Criteria CreateIdCriteria(object obj)
+        public Criteria CreateIdCriteria(object obj, int index)
         {
-            return new IdCriteria(acc.GetValue(obj), TargetName, ++index);
+            return new IdCriteria(acc.GetValue(obj), TargetName, index);
         }
     }
 
@@ -1045,18 +1223,18 @@ namespace Dapper.Aggregater
             ParentTableName = ParentType.GetTableName();
             ChildTableName = ChildType.GetTableName();
 
-            var parentProperties = ParentType.GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static).ToArray();
-            var childProperties = ChildType.GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static).ToArray();
+            var parentProperties = PropertyAccessorImp.ToPropertyAccessors(ParentType);
+            var childProperties = PropertyAccessorImp.ToPropertyAccessors(ChildType);
             for (int i = 0; i < ParentPropertyNames.Length; i++)
             {
                 var pName = ParentPropertyNames[i];
                 var cName = ChildPropertyNames[i];
 
-                var ppi = parentProperties.Single(x => x.Name == pName);
-                var cpi = childProperties.Single(x => x.Name == cName);
+                var ppi = parentProperties.Single(x => x.Att.PropertyInfoName == pName);
+                var cpi = childProperties.Single(x => x.Att.PropertyInfoName == cName);
 
-                parentPropertyAccessors.Add(PropertyAccessorImp.ToAccessor(ppi));
-                childPropertyAccessors.Add(PropertyAccessorImp.ToAccessor(cpi));
+                parentPropertyAccessors.Add(ppi);
+                childPropertyAccessors.Add(cpi);
             }
             DataAdapter = new DapperDataAdapter(this);
         }
@@ -1094,13 +1272,16 @@ namespace Dapper.Aggregater
             dic[key] = rows;
         }
 
-        internal IEnumerable<object> Find(object parent, string key, RelationAttribute att)
+        internal IEnumerable<object> Find(object parent, RelationAttribute att)
         {
             //http://stackoverflow.com/questions/7458139/net-is-type-gethashcode-guaranteed-to-be-unique
-            //hack sorry if not unique. hahaha
+            //hack 
+            var key = att.Key;
             var hash = parent.GetHashCode() ^ key.GetHashCode();
             if (hashDic.ContainsKey(hash))
                 return hashDic[hash];
+
+            if (!dic.ContainsKey(key)) return null;
 
             hashDic[hash] = new List<object>();
 
@@ -1160,8 +1341,8 @@ namespace Dapper.Aggregater
         }
         protected object Current { get; private set; }
         protected RelationAttribute[] Atts { get; private set; }
-        protected DataStore DataStore { get; private set; }
-        public IEnumerable<T> GetChildren<T>(string key = null)
+        internal protected DataStore DataStore { get; private set; }
+        public virtual IEnumerable<T> GetChildren<T>(string key = null)
         {
             var t = typeof(T);
             RelationAttribute att;
@@ -1184,7 +1365,7 @@ namespace Dapper.Aggregater
 
                 key = att.Key;
             }
-            var rows = DataStore.Find(Current, key, att);
+            var rows = DataStore.Find(Current, att);
             return rows.Cast<T>();
         }
     }
@@ -1519,12 +1700,12 @@ namespace Dapper.Aggregater
             var sql = string.Empty;
 
             var list = new List<string>();
-            for (int i = 0; i < Att.ParentPropertyNames.Length; i++)
+            for (int i = 0; i < Att.parentPropertyAccessors.Count; i++)
             {
-                var parentProperty = Att.ParentPropertyNames[i];
-                var childProperty = Att.ChildPropertyNames[i];
+                var parentProperty = Att.parentPropertyAccessors[i];
+                var childProperty = Att.childPropertyAccessors[i];
 
-                list.Add(string.Format(" {0}.{1} = {2}.{3}", Att.ParentTableName, parentProperty, Att.ChildTableName, childProperty));
+                list.Add(string.Format(" {0}.{1} = {2}.{3}", Att.ParentTableName, parentProperty.Att.Name, Att.ChildTableName, childProperty.Att.Name));
             }
 
             sql = string.Format(" EXISTS(SELECT 1 FROM {0} {1} WHERE {2})",
