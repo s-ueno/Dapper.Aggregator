@@ -399,6 +399,7 @@ namespace Dapper.Aggregater
         public abstract void Valid(object entity);
     }
 
+    [Serializable]
     [AttributeUsage(AttributeTargets.Class)]
     public class TableAttribute : Attribute
     {
@@ -408,6 +409,8 @@ namespace Dapper.Aggregater
         }
         public string Name { get; set; }
     }
+
+    [Serializable]
     [AttributeUsage(AttributeTargets.Property)]
     public class ColumnAttribute : Attribute
     {
@@ -420,6 +423,7 @@ namespace Dapper.Aggregater
         public string DbType { get; set; }
         public bool CanBeNull { get; set; }
     }
+    [Serializable]
     public class ColumnInfoCollection : List<ColumnAttribute>
     {
         public string ToSelectClause()
@@ -1102,6 +1106,7 @@ namespace Dapper.Aggregater
 
     #region not use reflection. simple GetGetMethod access
 
+    [Serializable]
     internal abstract class PropertyAccessorImp
     {
         public ColumnAttribute Att { get; set; }
@@ -1139,6 +1144,7 @@ namespace Dapper.Aggregater
         private static ConcurrentDictionary<Type, List<PropertyAccessorImp>> dic = new ConcurrentDictionary<Type, List<PropertyAccessorImp>>();
 
     }
+    [Serializable]
     internal class PropertyInfoProvider<TTarget, TProperty> : PropertyAccessorImp
     {
         private readonly Func<TTarget, TProperty> getter;
@@ -1208,9 +1214,9 @@ namespace Dapper.Aggregater
         public string ParentTableName { get; private set; }
         public string ChildTableName { get; private set; }
 
-        [NonSerialized]
+        //[NonSerialized]
         internal List<PropertyAccessorImp> parentPropertyAccessors = new List<PropertyAccessorImp>();
-        [NonSerialized]
+        //[NonSerialized]
         internal List<PropertyAccessorImp> childPropertyAccessors = new List<PropertyAccessorImp>();
 
         internal bool Loaded { get; set; }
