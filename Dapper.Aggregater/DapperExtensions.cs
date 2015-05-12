@@ -408,6 +408,7 @@ namespace Dapper.Aggregater
             Name = tableName;
         }
         public string Name { get; set; }
+        public string Description { get; set; }
     }
 
     [Serializable]
@@ -422,6 +423,7 @@ namespace Dapper.Aggregater
         public bool Ignore { get; set; }
         public string DbType { get; set; }
         public bool CanBeNull { get; set; }
+        public string Description { get; set; }
     }
     [Serializable]
     public class ColumnInfoCollection : List<ColumnAttribute>
