@@ -1408,7 +1408,7 @@ namespace Dapper.Aggregater
         public OperatorCriteria(string @operator, params Criteria[] args)
         {
             Operator = @operator;
-            Args = args;
+            Args = args.Where(x => x != null).ToArray();
         }
         public override string BuildStatement()
         {
