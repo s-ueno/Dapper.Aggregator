@@ -816,8 +816,6 @@ namespace Dapper.Aggregater
                         where.Add(string.Format("buff_rowNum <= {0}", MaxRecord.Value));
                     }
                     sql = string.Format("SELECT {0} FROM ({1}) T WHERE {2}", SelectClause, sql, string.Join(" AND ", where));
-
-                    Trace.TraceInformation(sql);
                 }
                 return sql;
             }
