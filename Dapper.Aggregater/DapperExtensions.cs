@@ -13,6 +13,24 @@ namespace Dapper.Aggregater
 {
     public static class DapperExtensions
     {
+        public static bool IsSqlTrace
+        {
+            get { return _isSqlTrace; }
+            set { _isSqlTrace = value; }
+        }
+        private static bool _isSqlTrace = true;
+        private static readonly TraceSource traceSource = new TraceSource("Dapper.Aggregater", SourceLevels.Verbose);
+        internal static void WriteLine(string message)
+        {
+            if (!IsSqlTrace) return;
+            traceSource.TraceEvent(TraceEventType.Verbose, 0, message);
+        }
+        internal static void WriteLine(string format, params object[] args)
+        {
+            if (!IsSqlTrace) return;
+            traceSource.TraceEvent(TraceEventType.Verbose, 0, format, args);
+        }
+
         //poco pattern
         // If the class does not implement interface(IContainerHolder), I embed interface dynamically using TypeBuilder.
         public static IEnumerable<T> QueryWith<T>(this IDbConnection cnn, Query<T> query,
@@ -28,6 +46,7 @@ namespace Dapper.Aggregater
             var oldType = query.RootType;
             var newParentType = ILGeneratorUtil.IsInjected(oldType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(oldType) : oldType;
 
+            WriteLine(query.Sql);
             var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout);
             if (rows != null && rows.Any())
             {
@@ -1072,6 +1091,8 @@ namespace Dapper.Aggregater
                             c.Att.ChildTableName,
                             c.BuildStatement());
                 }
+
+                DapperExtensions.WriteLine(sql);
                 var rows = cnn.Query(tableType, sql, command.Parameters, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
                 result.AddRange(rows);
             }
@@ -1083,6 +1104,8 @@ namespace Dapper.Aggregater
                     var statement = each.BuildStatement();
                     var param = each.BuildParameters();
                     var sql = string.Format("SELECT {0} FROM {1} WHERE {2} ", clause, tableName, statement);
+
+                    DapperExtensions.WriteLine(sql);
                     var rows = cnn.Query(tableType, sql, param, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
                     result.AddRange(rows);
                 }
