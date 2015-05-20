@@ -244,6 +244,10 @@ namespace Dapper.Aggregater
             return memExp.Member.CreateColumnInfo();
         }
 
+        public static Int64 Count<T>(this IDbConnection cnn, Query<T> query)
+        {
+            return cnn.ExecuteScalar<Int64>(string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy), query.Parameters);
+        }
         public static TResult Count<TResult>(this IDbConnection cnn, QueryImp query)
         {
             return cnn.ExecuteScalar<TResult>(string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy), query.Parameters);
@@ -766,6 +770,9 @@ namespace Dapper.Aggregater
         internal protected Type RootType { get; protected set; }
         internal protected int CriteriaIndex { get; set; }
 
+        public int? StartRecord { get; set; }
+        public int? MaxRecord { get; set; }
+
         public List<RelationAttribute> Relations { get; private set; }
         protected List<string> Sorts { get; private set; }
         protected List<string> Groups { get; private set; }
@@ -780,38 +787,62 @@ namespace Dapper.Aggregater
         {
             get
             {
-                return string.Format("SELECT {0} {1} FROM {2} {3} {4} {5} {6}",
-                    SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause, OrderByClause);
+                return string.Format("{0} {1} ", SqlIgnoreOrderBy, OrderByClause);
             }
         }
         public virtual string SqlIgnoreOrderBy
         {
             get
             {
-                return string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
-                    SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause);
+                var sql = string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
+                                SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause);
+
+                if (StartRecord.HasValue || MaxRecord.HasValue)
+                {
+                    if (!SelectClauseCollection.Any(x => x.IsPrimaryKey))
+                        throw new InvalidOperationException("StartRecord or MaxRecord need to set the primary key");
+
+                    sql = string.Format("SELECT ROW_NUMBER() OVER (ORDER BY {0}) AS buff_rowNum, T.* FROM ({1}) T ",
+                                string.Join(",", SelectClauseCollection.Where(x => x.IsPrimaryKey).Select(x => x.Name)),
+                                sql);
+
+                    var where = new List<string>();
+                    if (StartRecord.HasValue)
+                    {
+                        where.Add(string.Format("{0} <= buff_rowNum", StartRecord.Value));
+                    }
+                    if (MaxRecord.HasValue)
+                    {
+                        where.Add(string.Format("buff_rowNum <= {0}", MaxRecord.Value));
+                    }
+                    sql = string.Format("SELECT {0} FROM ({1}) T WHERE {2}", SelectClause, sql, string.Join(" AND ", where));
+
+                    Trace.TraceInformation(sql);
+                }
+                return sql;
             }
         }
+
         internal protected virtual string SelectClause
         {
             get
             {
-                var selectClause = string.Empty;
-                if (CustomSelectClauses.Any())
-                {
-                    selectClause = CustomSelectClauses.ToSelectClause();
-                }
-                else
-                {
-                    selectClause = RootType.GetSelectClause().ToSelectClause();
-                }
-                return selectClause;
+                return SelectClauseCollection.ToSelectClause();
             }
         }
         internal ColumnInfoCollection CustomSelectClauses { get; set; }
 
+        internal protected virtual ColumnInfoCollection SelectClauseCollection
+        {
+            get
+            {
+                return CustomSelectClauses.Any() ? CustomSelectClauses : RootType.GetSelectClause();
+            }
+        }
+
 
         public string SelectTopClause { get; set; }
+
         internal protected virtual string TableClause { get { return RootType.GetTableName(); } }
         internal protected virtual string WhereClause
         {
