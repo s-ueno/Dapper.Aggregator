@@ -9,7 +9,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text;
 
-namespace Dapper.Aggregater
+namespace Dapper.Aggregator
 {
     public static class DapperExtensions
     {
@@ -56,6 +56,12 @@ namespace Dapper.Aggregater
             return rows;
         }
 
+        public static T ScalarWith<T>(this IDbConnection cnn, QueryImp query, IDbTransaction transaction = null, int? commandTimeout = null)
+        {
+            WriteLine(query.Sql);
+            return cnn.ExecuteScalar<T>(query.Sql, query.Parameters, transaction, commandTimeout, CommandType.Text);
+        }
+
         private static void LoadWith(IDbConnection cnn, CommandDefinition command, Type t, RelationAttribute[] atts, System.Collections.IEnumerable roots)
         {
             var rootAtts = atts.Where(x => !x.Loaded && x.ParentType == t).ToArray();
@@ -93,6 +99,7 @@ namespace Dapper.Aggregater
         public static int UpdateQuery<T>(this IDbConnection cnn, UpdateQuery<T> query,
             IDbTransaction transaction = null, int? commandTimeout = null)
         {
+            WriteLine(query.UpdateClauses);
             return cnn.Execute(query.UpdateClauses, query.Parameters, transaction, commandTimeout);
         }
         public static int DeleteQuery<T>(this IDbConnection cnn, Query<T> query,
@@ -115,6 +122,7 @@ namespace Dapper.Aggregater
                 }
                 foreach (var each in list.OrderByDescending(x => x.NestLevel))
                 {
+                    WriteLine(each.DeleteClause);
                     cnn.Execute(each.DeleteClause, query.Parameters, transaction, commandTimeout);
                 }
             }
@@ -265,118 +273,190 @@ namespace Dapper.Aggregater
 
         public static Int64 Count<T>(this IDbConnection cnn, Query<T> query)
         {
-            return cnn.ExecuteScalar<Int64>(string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy), query.Parameters);
+            var sql = string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy);
+            WriteLine(sql);
+            return cnn.ExecuteScalar<Int64>(sql, query.Parameters);
         }
         public static TResult Count<TResult>(this IDbConnection cnn, QueryImp query)
         {
-            return cnn.ExecuteScalar<TResult>(string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy), query.Parameters);
+            var sql = string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy);
+            WriteLine(sql);
+            return cnn.ExecuteScalar<TResult>(sql, query.Parameters);
         }
 
-        public static void InsertEntity<T>(this IDbConnection cnn, T entity, IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
+        public static void InsertEntity(this IDbConnection cnn, object entity, IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
         {
-            InsertEntity(cnn, (new T[] { entity }) as IEnumerable<T>, transaction, commandTimeout);
+            if (entity == null)
+                throw new ArgumentNullException("entity");
+
+            var type = entity.GetType();
+            var table = type.GetTableName();
+            var columns = type.GetSelectClause();
+            var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
+            var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
+            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
+
+            foreach (var validator in validators)
+            {
+                var result = validator.GetError(entity);
+                if (result != null)
+                {
+                    if (throwValidateError)
+                    {
+                        throw result;
+                    }
+                }
+            }
+
+            var dic = new Dictionary<string, object>();
+            foreach (var column in columns)
+            {
+                if (column.Ignore) continue;
+
+                var value = accessors[column.PropertyInfoName].GetValue(entity);
+                if (column.IsVersion)
+                {
+                    foreach (var policy in versionPolicy)
+                    {
+                        value = policy.Generate(value);
+                    }
+                }
+                dic[string.Format("@{0}", column.PropertyInfoName)] = value;
+            }
+            var sql = string.Format("INSERT INTO {0} ({1}) VALUES ({2});", table, string.Join(",", columns.Select(x => x.Name)), string.Join(",", dic.Keys));
+            WriteLine(sql);
+            cnn.Execute(sql, dic, transaction, commandTimeout);
+
         }
         public static void InsertEntity<T>(this IDbConnection cnn, IEnumerable<T> entities,
             IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
         {
-            var rootType = typeof(T);
-            var table = rootType.GetTableName();
-            var columns = rootType.GetSelectClause();
-            var accessors = PropertyAccessorImp.ToPropertyAccessors(rootType).ToDictionary(x => x.Name);
-            var validators = AttributeUtil.Find<EntityValidateAttribute>(rootType);
             foreach (var each in entities)
             {
-                var hasError = false;
-                foreach (var validator in validators)
-                {
-                    var result = validator.GetError(each);
-                    if (result != null)
-                    {
-                        if (throwValidateError)
-                        {
-                            throw result;
-                        }
-                        hasError = true;
-                        break;
-                    }
-                }
-                if (hasError) continue;
-
-                var dic = new Dictionary<string, object>();
-                foreach (var column in columns)
-                {
-                    if (column.Ignore) continue;
-                    dic[string.Format("@{0}", column.PropertyInfoName)] = accessors[column.PropertyInfoName].GetValue(each);
-                }
-                var sql = string.Format("INSERT INTO {0} ({1}) VALUES ({2});", table, string.Join(",", columns.Select(x => x.Name)), string.Join(",", dic.Keys));
-                cnn.Execute(sql, dic, transaction, commandTimeout);
-
+                InsertEntity(cnn, each, transaction, commandTimeout, throwValidateError);
             }
         }
 
-        public static void UpdateEntity<T>(this IDbConnection cnn, IEnumerable<T> entities,
+        public static void UpdateEntity(this IDbConnection cnn, object entity,
             IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
         {
-            var rootType = typeof(T);
-            var table = rootType.GetTableName();
-            var columns = rootType.GetSelectClause();
+            if (entity == null)
+                throw new ArgumentNullException("entity");
+
+            var type = entity.GetType();
+            var table = type.GetTableName();
+            var columns = type.GetSelectClause();
             if (!columns.Any(x => x.IsPrimaryKey))
                 throw new System.Data.MissingPrimaryKeyException("should have a primary key.");
 
-            var accessors = PropertyAccessorImp.ToPropertyAccessors(rootType).ToDictionary(x => x.Name);
-            var validators = AttributeUtil.Find<EntityValidateAttribute>(rootType);
-            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(rootType);
+            var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
+            var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
+            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
+
+            foreach (var validator in validators)
+            {
+                var result = validator.GetError(entity);
+                if (result != null)
+                {
+                    if (throwValidateError)
+                    {
+                        throw result;
+                    }
+                }
+            }
+
+            var dic = new Dictionary<string, object>();
+            var setList = new List<SetClausesHolder>();
+            var index = 0;
+            foreach (var column in columns.Where(x => !x.IsPrimaryKey && !x.Ignore))
+            {
+                var value = accessors[column.PropertyInfoName].GetValue(entity);
+                if (column.IsVersion)
+                {
+                    foreach (var policy in versionPolicy)
+                    {
+                        value = policy.Generate(value);
+                    }
+                }
+
+                var setClauses = new SetClausesHolder(column.Name, value, ++index);
+                dic[setClauses.Placeholder] = setClauses.Value;
+                setList.Add(setClauses);
+            }
+            var whereList = new List<SetClausesHolder>();
+            foreach (var column in columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore))
+            {
+                var whereClauses = new SetClausesHolder(column.Name, accessors[column.PropertyInfoName].GetValue(entity), ++index);
+                dic[whereClauses.Placeholder] = whereClauses.Value;
+                whereList.Add(whereClauses);
+            }
+
+            var sql = string.Format("UPDATE {0} SET {1} WHERE {2}", table,
+                        string.Join(",", setList.Select(x => x.Clauses)),
+                        string.Join(" AND ", whereList.Select(x => x.Clauses)));
+            WriteLine(sql);
+            var count = cnn.Execute(sql, dic, transaction, commandTimeout);
+            if (count != 1)
+                throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+        }
+        public static void UpdateEntity<T>(this IDbConnection cnn, IEnumerable<T> entities,
+            IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
+        {
             foreach (var each in entities)
             {
-                var hasError = false;
-                foreach (var validator in validators)
+                UpdateEntity(cnn, each, transaction, commandTimeout, throwValidateError);
+            }
+        }
+        public static void DeleteEntity(this IDbConnection cnn, object entity,
+            IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
+        {
+            if (entity == null)
+                throw new ArgumentNullException("entity");
+
+            var type = entity.GetType();
+            var table = type.GetTableName();
+            var columns = type.GetSelectClause();
+            if (!columns.Any(x => x.IsPrimaryKey))
+                throw new System.Data.MissingPrimaryKeyException("should have a primary key.");
+
+            var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
+            var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
+            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
+
+            foreach (var validator in validators)
+            {
+                var result = validator.GetError(entity);
+                if (result != null)
                 {
-                    var result = validator.GetError(each);
-                    if (result != null)
+                    if (throwValidateError)
                     {
-                        if (throwValidateError)
-                        {
-                            throw result;
-                        }
-                        hasError = true;
-                        break;
+                        throw result;
                     }
                 }
-                if (hasError) continue;
+            }
 
-                var dic = new Dictionary<string, object>();
-                var setList = new List<SetClausesHolder>();
-                var index = 0;
-                foreach (var column in columns.Where(x => !x.IsPrimaryKey && !x.Ignore))
-                {
-                    var value = accessors[column.PropertyInfoName].GetValue(each);
-                    if (column.IsVersion)
-                    {
-                        foreach (var policy in versionPolicy)
-                        {
-                            value = policy.Generate(value);
-                        }
-                    }
-
-                    var setClauses = new SetClausesHolder(column.Name, value, ++index);
-                    dic[setClauses.Placeholder] = setClauses.Value;
-                    setList.Add(setClauses);
-                }
-                var whereList = new List<SetClausesHolder>();
-                foreach (var column in columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore))
-                {
-                    var whereClauses = new SetClausesHolder(column.Name, accessors[column.PropertyInfoName].GetValue(each), ++index);
-                    dic[whereClauses.Placeholder] = whereClauses.Value;
-                    whereList.Add(whereClauses);
-                }
-
-                var sql = string.Format("UPDATE {0} SET {1} WHERE {2}", table,
-                            string.Join(",", setList.Select(x => x.Clauses)),
-                            string.Join(" AND ", whereList.Select(x => x.Clauses)));
-                var count = cnn.Execute(sql, dic, transaction, commandTimeout);
-                if (count != 1)
-                    throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
-
+            var dic = new Dictionary<string, object>();
+            var whereList = new List<SetClausesHolder>();
+            var index = 0;
+            foreach (var column in columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore))
+            {
+                var whereClauses = new SetClausesHolder(column.Name, accessors[column.PropertyInfoName].GetValue(entity), ++index);
+                dic[whereClauses.Placeholder] = whereClauses.Value;
+                whereList.Add(whereClauses);
+            }
+            var sql = string.Format("DELETE FROM {0} WHERE {1}", table,
+                        string.Join(" AND ", whereList.Select(x => x.Clauses)));
+            WriteLine(sql);
+            var count = cnn.Execute(sql, dic, transaction, commandTimeout);
+            if (count != 1)
+                throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+        }
+        public static void DeleteEntity<T>(this IDbConnection cnn, IEnumerable<T> entities,
+           IDbTransaction transaction = null, int? commandTimeout = null, bool throwValidateError = true)
+        {
+            foreach (var each in entities)
+            {
+                DeleteEntity(cnn, each, transaction, commandTimeout, throwValidateError);
             }
         }
     }
@@ -793,8 +873,8 @@ namespace Dapper.Aggregater
         public int? MaxRecord { get; set; }
 
         public List<RelationAttribute> Relations { get; private set; }
-        protected List<string> Sorts { get; private set; }
-        protected List<string> Groups { get; private set; }
+        public List<string> Sorts { get; private set; }
+        public List<string> Groups { get; private set; }
         public QueryImp()
         {
             Relations = new List<RelationAttribute>();
@@ -818,12 +898,11 @@ namespace Dapper.Aggregater
 
                 if (StartRecord.HasValue || MaxRecord.HasValue)
                 {
-                    if (!SelectClauseCollection.Any(x => x.IsPrimaryKey))
-                        throw new InvalidOperationException("StartRecord or MaxRecord need to set the primary key");
+                    if (!SelectClauseCollection.Any(x => x.IsPrimaryKey) && !Sorts.Any())
+                        throw new InvalidOperationException("StartRecord or MaxRecord need to set the primary key or Sort key");
 
                     sql = string.Format("SELECT ROW_NUMBER() OVER (ORDER BY {0}) AS buff_rowNum, T.* FROM ({1}) T ",
-                                string.Join(",", SelectClauseCollection.Where(x => x.IsPrimaryKey).Select(x => x.Name)),
-                                sql);
+                                        Sorts.Any() ? string.Join(",", Sorts) : string.Join(",", SelectClauseCollection.Where(x => x.IsPrimaryKey).Select(x => x.Name)), sql);
 
                     var where = new List<string>();
                     if (StartRecord.HasValue)

@@ -1,10 +1,10 @@
-﻿using Dapper.Aggregater.SampleConsoleApp.Model;
+﻿using Dapper.Aggregator.SampleConsoleApp.Model;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 
-namespace Dapper.Aggregater.SampleConsoleApp
+namespace Dapper.Aggregator.SampleConsoleApp
 {
 
     [Relation(typeof(EventDetailsTable_Holder), typeof(CodeTable), "CodeTableID", "CodeTableCD")]

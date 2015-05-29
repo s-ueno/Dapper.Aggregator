@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Dapper;
-using Dapper.Aggregater;
-namespace Dapper.Aggregater.SampleConsoleApp.Model
+using Dapper.Aggregator;
+namespace Dapper.Aggregator.SampleConsoleApp.Model
 {
     public class CodeTable
     {

@@ -3,12 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using Dapper;
-using Dapper.Aggregater.SampleConsoleApp.Model;
+using Dapper.Aggregator.SampleConsoleApp.Model;
 using System.Diagnostics;
 using System.Collections;
 using System.Data;
 
-namespace Dapper.Aggregater.SampleConsoleApp
+namespace Dapper.Aggregator.SampleConsoleApp
 {
     class Program
     {

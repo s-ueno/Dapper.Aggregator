@@ -6,7 +6,7 @@ using System.Data.Common;
 using System.Linq;
 using System.Text;
 
-namespace Dapper.Aggregater.SampleConsoleApp
+namespace Dapper.Aggregator.SampleConsoleApp
 {
     public static class DbConnectionRepository
     {
