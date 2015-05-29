@@ -1,10 +1,11 @@
-Dapper.Aggregater.v12.suo
+Dapper.Aggregator.v12.suo
 *.pdb
 *.dll
 *.xml
 *.cache
 *.exe
-Dapper.Aggregater.SampleConsoleApp/bin/*
-Dapper.Aggregater.SampleConsoleApp/obj/*
-Dapper.Aggregater/obj/*
-Dapper.Aggregater/DapperExtensions.cs~RF217514e3.TMP
+Dapper.Aggregator.SampleConsoleApp/bin/*
+Dapper.Aggregator.SampleConsoleApp/obj/*
+Dapper.Aggregator/obj/*
+Dapper.Aggregator/DapperExtensions.cs~RF217514e3.TMP
+Dapper.Aggregator.suo
