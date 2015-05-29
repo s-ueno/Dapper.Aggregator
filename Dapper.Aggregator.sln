@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 2013
 VisualStudioVersion = 12.0.31101.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregator", "Dapper.Aggregater\Dapper.Aggregator.csproj", "{E5CE9B74-C868-429A-840E-4F60D461F118}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregator", "Dapper.Aggregator\Dapper.Aggregator.csproj", "{E5CE9B74-C868-429A-840E-4F60D461F118}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ExternalFiles", "ExternalFiles", "{ECB32CDC-636C-47F4-8968-71080736F850}"
 	ProjectSection(SolutionItems) = preProject
@@ -20,7 +20,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ExternalFiles", "ExternalFi
 		ExternalFiles\System.Data.SqlServerCe.dll = ExternalFiles\System.Data.SqlServerCe.dll
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregator.SampleConsoleApp", "Dapper.Aggregater.SampleConsoleApp\Dapper.Aggregator.SampleConsoleApp.csproj", "{B6FAF935-AF52-423C-A86E-4619DBA862F6}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregator.SampleConsoleApp", "Dapper.Aggregator.SampleConsoleApp\Dapper.Aggregator.SampleConsoleApp.csproj", "{B6FAF935-AF52-423C-A86E-4619DBA862F6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
