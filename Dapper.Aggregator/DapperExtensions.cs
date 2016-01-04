@@ -323,7 +323,7 @@ namespace Dapper.Aggregator
                 }
                 dic[string.Format("@{0}", column.PropertyInfoName)] = value;
             }
-            var sql = string.Format("INSERT INTO {0} ({1}) VALUES ({2});", table, string.Join(",", columns.Select(x => x.Name)), string.Join(",", dic.Keys));
+            var sql = string.Format("INSERT INTO {0} ({1}) VALUES ({2});", table, string.Join(",", columns.Where(x => !x.Ignore).Select(x => x.Name)), string.Join(",", dic.Keys));
             WriteLine(sql);
             cnn.Execute(sql, dic, transaction, commandTimeout);
 
