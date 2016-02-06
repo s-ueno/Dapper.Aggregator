@@ -102,19 +102,18 @@ namespace Dapper.Aggregator
             WriteLine(query.UpdateClauses);
             return cnn.Execute(query.UpdateClauses, query.Parameters, transaction, commandTimeout);
         }
-        public static int DeleteQuery<T>(this IDbConnection cnn, Query<T> query,
+        public static int DeleteQuery(this IDbConnection cnn, QueryImp query,
             IDbTransaction transaction = null, int? commandTimeout = null, bool isRootOnly = true)
         {
             if (!isRootOnly)
             {
                 query.Ensure(injectionDynamicType: false);
-                var rootType = typeof(T);
                 var rootView = string.Format("SELECT {0} FROM {1} {2}", query.SelectClause, query.TableClause, query.WhereClause);
                 var atts = query.Relations.ToList();
                 var list = new List<DeleteQueryObject>();
                 foreach (var each in query.Relations)
                 {
-                    if (each.ParentType == typeof(T))
+                    if (each.ParentType == query.RootType)
                     {
                         atts.Remove(each);
                         RecursiveDeleteQuery(atts, list, new DeleteQueryObject(each, rootView, 0));
@@ -862,6 +861,32 @@ namespace Dapper.Aggregator
 
             return this;
         }
+
+        public Criteria Exists(Type childType, string[] sourceColumn, string[] targetColumn, Criteria childCriteria = null)
+        {
+            var parentTableName = this.TableClause;
+            var childTableName = childType.GetTableName();
+
+            if (!sourceColumn.Any() || !targetColumn.Any())
+                throw new ArgumentException("Number of Columns is required.");
+
+            if (sourceColumn.Length != targetColumn.Length)
+                throw new ArgumentException("Number of Columns is mismatch.");
+
+            var list = new List<string>();
+            for (int i = 0; i < sourceColumn.Length; i++)
+            {
+                list.Add(string.Format("({0}.{1} = {2}.{3})", parentTableName, sourceColumn[i], childTableName, targetColumn[i]));
+            }
+            if (childCriteria != null)
+            {
+                list.Add(childCriteria.BuildStatement());
+            }
+
+            var sql = string.Format("EXISTS(SELECT 1 FROM {0} WHERE {1})", childTableName, string.Join(" AND ", list));
+            return new ExpressionCriteria(sql, childCriteria != null ? childCriteria.BuildParameters() : null);
+        }
+
     }
 
     public abstract class QueryImp

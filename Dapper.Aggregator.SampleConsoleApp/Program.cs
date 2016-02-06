@@ -34,7 +34,8 @@ namespace Dapper.Aggregator.SampleConsoleApp
                            !query.Like(x => x.EventTitle, "AAAAA", LikeCriteria.Match.Start) |
                            query.LessThan(x => x.EventTableID, 100) &
                            query.IsNotNull(x => x.EventTableID) &
-                           query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
+                           query.Exists(typeof(EventDetailsTable), new[] { "EventTableID" }, new[] { "EventTableID" });
+            //query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
 
             query.GroupBy(x => x.EventTableID)
                  .GroupBy(x => x.EventTime)
