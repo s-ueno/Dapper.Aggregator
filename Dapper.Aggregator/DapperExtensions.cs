@@ -543,6 +543,10 @@ namespace Dapper.Aggregator
                 {
                     ret = string.Format("({0}) AS {1}", each.Expression, each.Name);
                 }
+                else
+                {
+                    ret = string.Format("{0} AS {1}", each.Name, each.PropertyInfoName);
+                }
                 list.Add(ret);
             }
             return string.Join(",", list);
