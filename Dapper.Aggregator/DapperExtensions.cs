@@ -480,6 +480,17 @@ namespace Dapper.Aggregator
     {
         public abstract object Generate(object currentVersionValue);
     }
+    [Serializable]
+    public class NumericVersionPolicyAttribute : VersionPolicyAttribute
+    {
+        public override object Generate(object currentVersionValue)
+        {
+            var lockVersion = currentVersionValue as int?;
+            return lockVersion.HasValue ? lockVersion.Value + 1 : 0;
+        }
+    }
+
+
 
     [Serializable]
     public abstract class EntityValidateAttribute : Attribute
