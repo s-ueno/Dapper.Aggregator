@@ -1345,7 +1345,7 @@ namespace Dapper.Aggregator
 
         public Criteria CreateIdCriteria(object obj, int index)
         {
-            return new IdCriteria(acc.GetValue(obj), TargetName, index);
+            return new IdCriteria(acc.GetValue(obj), acc.Att.Name, index);
         }
     }
 
