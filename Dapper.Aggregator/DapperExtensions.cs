@@ -734,7 +734,13 @@ namespace Dapper.Aggregator
         public string SetClauses { get; private set; }
         public object Value { get; private set; }
         public int Index { get; private set; }
-        internal string Placeholder { get { return string.Format("@{0}{1}", SetClauses, Index); } }
+        internal string Placeholder
+        {
+            get
+            {
+                return string.Format("@{0}{1}", "p", Index);
+            }
+        }
         internal string Clauses { get { return string.Format("{0} = {1}", SetClauses, Placeholder); } }
     }
     public class UpdateQuery<T> : Query<T>
