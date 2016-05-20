@@ -541,7 +541,7 @@ namespace Dapper.Aggregator
     [Serializable]
     public class ColumnInfoCollection : List<ColumnAttribute>
     {
-        public string ToSelectClause()
+        public string ToSelectClause(bool needAliasByPropertyName = true)
         {
             var list = new List<string>();
             foreach (var each in this)
@@ -552,11 +552,25 @@ namespace Dapper.Aggregator
                 var ret = each.Name;
                 if (!string.IsNullOrWhiteSpace(each.Expression))
                 {
-                    ret = string.Format("({0}) AS {1}", each.Expression, each.Name);
+                    if (needAliasByPropertyName)
+                    {
+                        ret = string.Format("({0}) AS {1}", each.Expression, each.PropertyInfoName);
+                    }
+                    else
+                    {
+                        ret = string.Format("({0}) AS {1}", each.Expression, each.Name);
+                    }
                 }
                 else
                 {
-                    ret = string.Format("{0} AS {1}", each.Name, each.PropertyInfoName);
+                    if (needAliasByPropertyName)
+                    {
+                        ret = string.Format("{0} AS {1}", each.Name, each.PropertyInfoName);
+                    }
+                    else
+                    {
+                        ret = string.Format("{0} AS {1}", each.Name, each.Name);
+                    }
                 }
                 list.Add(ret);
             }
@@ -1149,9 +1163,9 @@ namespace Dapper.Aggregator
 
             for (int i = 0; i < att.ChildPropertyNames.Length; i++)
             {
-                var target = att.ChildPropertyNames[i];
+                var target = att.childPropertyAccessors[i];
                 var pi = att.parentPropertyAccessors[i];
-                dataParameter.Add(new DapperDataParameter(target, pi));
+                dataParameter.Add(new DapperDataParameter(target.Att.Name, pi));
             }
         }
 
@@ -1351,7 +1365,7 @@ namespace Dapper.Aggregator
 
         public Criteria CreateIdCriteria(object obj, int index)
         {
-            return new IdCriteria(acc.GetValue(obj), acc.Att.Name, index);
+            return new IdCriteria(acc.GetValue(obj), TargetName, index);
         }
     }
 
