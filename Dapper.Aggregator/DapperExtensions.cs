@@ -961,7 +961,9 @@ namespace Dapper.Aggregator
                     throw new InvalidOperationException("StartRecord or MaxRecord need to set the primary key or Sort key");
 
                 sql = string.Format("SELECT ROW_NUMBER() OVER (ORDER BY {0}) AS buff_rowNum, T.* FROM ({1}) T ",
-                                    Sorts.Any() ? string.Join(",", Sorts) : string.Join(",", SelectClauseCollection.Where(x => x.IsPrimaryKey).Select(x => x.Name)), sql);
+                                    Sorts.Any() ? string.Join(",", Sorts) : string.Join(",", SelectClauseCollection.Where(x => x.IsPrimaryKey).Select(x => x.Name)),
+                                    string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
+                                        SelectTopClause, SelectClauseCollection.ToSelectClause(false), TableClause, WhereClause, GroupByClause, HavingClause));
 
                 var where = new List<string>();
                 if (StartRecord.HasValue)
@@ -975,36 +977,6 @@ namespace Dapper.Aggregator
                 sql = string.Format("SELECT {0} FROM ({1}) T WHERE {2}", SelectClauseCollection.ToSelectClause(needAliasByPropertyName), sql, string.Join(" AND ", where));
             }
             return sql;
-        }
-
-        public virtual string SqlIgnoreOrderBy
-        {
-            get
-            {
-                var sql = string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
-                                SelectTopClause, SelectClauseCollection.ToSelectClause(), TableClause, WhereClause, GroupByClause, HavingClause);
-
-                if (StartRecord.HasValue || MaxRecord.HasValue)
-                {
-                    if (!SelectClauseCollection.Any(x => x.IsPrimaryKey) && !Sorts.Any())
-                        throw new InvalidOperationException("StartRecord or MaxRecord need to set the primary key or Sort key");
-
-                    sql = string.Format("SELECT ROW_NUMBER() OVER (ORDER BY {0}) AS buff_rowNum, T.* FROM ({1}) T ",
-                                        Sorts.Any() ? string.Join(",", Sorts) : string.Join(",", SelectClauseCollection.Where(x => x.IsPrimaryKey).Select(x => x.Name)), sql);
-
-                    var where = new List<string>();
-                    if (StartRecord.HasValue)
-                    {
-                        where.Add(string.Format("{0} <= buff_rowNum", StartRecord.Value));
-                    }
-                    if (MaxRecord.HasValue)
-                    {
-                        where.Add(string.Format("buff_rowNum <= {0}", MaxRecord.Value));
-                    }
-                    sql = string.Format("SELECT {0} FROM ({1}) T WHERE {2}", SelectClauseCollection.ToSelectClause(), sql, string.Join(" AND ", where));
-                }
-                return sql;
-            }
         }
 
         internal ColumnInfoCollection CustomSelectClauses { get; set; }
