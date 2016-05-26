@@ -1183,8 +1183,10 @@ namespace Dapper.Aggregator
         {
             var result = new List<object>();
             var tableType = relationAttribute.ChildType;
+            var newTableType = ILGeneratorUtil.IsInjected(tableType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(tableType) : tableType;
+
             var tableName = relationAttribute.ChildTableName;
-            var clause = tableType.GetSelectClause().ToSelectClause();
+            var clause = newTableType.GetSelectClause().ToSelectClause();
             var splitCriteria = SplitCriteria();
 
 
@@ -1222,7 +1224,7 @@ namespace Dapper.Aggregator
                 }
 
                 DapperExtensions.WriteLine(sql);
-                var rows = cnn.Query(tableType, sql, command.Parameters, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
+                var rows = cnn.Query(newTableType, sql, command.Parameters, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
                 result.AddRange(rows);
             }
             else
@@ -1235,7 +1237,7 @@ namespace Dapper.Aggregator
                     var sql = string.Format("SELECT {0} FROM {1} WHERE {2} ", clause, tableName, statement);
 
                     DapperExtensions.WriteLine(sql);
-                    var rows = cnn.Query(tableType, sql, param, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
+                    var rows = cnn.Query(newTableType, sql, param, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
                     result.AddRange(rows);
                 }
             }
@@ -1473,6 +1475,10 @@ namespace Dapper.Aggregator
             //hack 
             var key = att.Key;
             var hash = parent.GetHashCode() ^ key.GetHashCode();
+
+            if (hashDic == null)
+                hashDic = new ConcurrentDictionary<int, List<object>>();
+
             if (hashDic.ContainsKey(hash))
                 return hashDic[hash];
 
@@ -1505,7 +1511,7 @@ namespace Dapper.Aggregator
         }
 
         [NonSerialized]
-        static ConcurrentDictionary<int, List<object>> hashDic = new ConcurrentDictionary<int, List<object>>();
+        ConcurrentDictionary<int, List<object>> hashDic = new ConcurrentDictionary<int, List<object>>();
         private class ValueEqualityComparer : IEqualityComparer<object>
         {
             new public bool Equals(object x, object y)
