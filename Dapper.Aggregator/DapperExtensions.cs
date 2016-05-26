@@ -46,12 +46,11 @@ namespace Dapper.Aggregator
             var oldType = query.RootType;
             var newParentType = ILGeneratorUtil.IsInjected(oldType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(oldType) : oldType;
 
-            var rootSql = query.BuildSql(true);
-            WriteLine(rootSql);
-            var rows = cnn.Query(newParentType, rootSql, query.Parameters, transaction, buffered, commandTimeout);
+            WriteLine(query.Sql);
+            var rows = cnn.Query(newParentType, query.Sql, query.Parameters, transaction, buffered, commandTimeout);
             if (rows != null && rows.Any())
             {
-                var command = new CommandDefinition(query.BuildSqlIgnoreOrderBy(false), query.Parameters, transaction, commandTimeout, null, buffered ? CommandFlags.Buffered : CommandFlags.None);
+                var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, commandTimeout, null, buffered ? CommandFlags.Buffered : CommandFlags.None);
                 LoadWith(cnn, command, newParentType, query.Relations.ToArray(), rows);
             }
             return rows;
@@ -59,9 +58,8 @@ namespace Dapper.Aggregator
 
         public static T ScalarWith<T>(this IDbConnection cnn, QueryImp query, IDbTransaction transaction = null, int? commandTimeout = null)
         {
-            var sql = query.BuildSql();
-            WriteLine(sql);
-            return cnn.ExecuteScalar<T>(sql, query.Parameters, transaction, commandTimeout, CommandType.Text);
+            WriteLine(query.Sql);
+            return cnn.ExecuteScalar<T>(query.Sql, query.Parameters, transaction, commandTimeout, CommandType.Text);
         }
 
         private static void LoadWith(IDbConnection cnn, CommandDefinition command, Type t, RelationAttribute[] atts, System.Collections.IEnumerable roots)
@@ -110,7 +108,7 @@ namespace Dapper.Aggregator
             if (!isRootOnly)
             {
                 query.Ensure(injectionDynamicType: false);
-                var rootView = string.Format("SELECT {0} FROM {1} {2}", query.SelectClauseCollection.ToSelectClause(false), query.TableClause, query.WhereClause);
+                var rootView = string.Format("SELECT {0} FROM {1} {2}", query.SelectClause, query.TableClause, query.WhereClause);
                 var atts = query.Relations.ToList();
                 var list = new List<DeleteQueryObject>();
                 foreach (var each in query.Relations)
@@ -127,9 +125,7 @@ namespace Dapper.Aggregator
                     cnn.Execute(each.DeleteClause, query.Parameters, transaction, commandTimeout);
                 }
             }
-
             var rootDeleteSql = string.Format("DELETE FROM {0} {1}", query.TableClause, query.WhereClause);
-            WriteLine(rootDeleteSql);
             return cnn.Execute(rootDeleteSql, query.Parameters, transaction, commandTimeout);
         }
         private static void RecursiveDeleteQuery(List<RelationAttribute> atts, List<DeleteQueryObject> items, DeleteQueryObject rd)
@@ -276,13 +272,13 @@ namespace Dapper.Aggregator
 
         public static Int64 Count<T>(this IDbConnection cnn, Query<T> query)
         {
-            var sql = string.Format("SELECT COUNT(1) FROM ({0}) T", query.BuildSqlIgnoreOrderBy(false));
+            var sql = string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy);
             WriteLine(sql);
             return cnn.ExecuteScalar<Int64>(sql, query.Parameters);
         }
         public static TResult Count<TResult>(this IDbConnection cnn, QueryImp query)
         {
-            var sql = string.Format("SELECT COUNT(1) FROM ({0}) T", query.BuildSqlIgnoreOrderBy(false));
+            var sql = string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy);
             WriteLine(sql);
             return cnn.ExecuteScalar<TResult>(sql, query.Parameters);
         }
@@ -545,7 +541,7 @@ namespace Dapper.Aggregator
     [Serializable]
     public class ColumnInfoCollection : List<ColumnAttribute>
     {
-        public string ToSelectClause(bool needAliasByPropertyName = true)
+        public string ToSelectClause()
         {
             var list = new List<string>();
             foreach (var each in this)
@@ -556,25 +552,11 @@ namespace Dapper.Aggregator
                 var ret = each.Name;
                 if (!string.IsNullOrWhiteSpace(each.Expression))
                 {
-                    if (needAliasByPropertyName)
-                    {
-                        ret = string.Format("({0}) AS {1}", each.Expression, each.PropertyInfoName);
-                    }
-                    else
-                    {
-                        ret = string.Format("({0}) AS {1}", each.Expression, each.Name);
-                    }
+                    ret = string.Format("({0}) AS {1}", each.Expression, each.Name);
                 }
                 else
                 {
-                    if (needAliasByPropertyName)
-                    {
-                        ret = string.Format("{0} AS {1}", each.Name, each.PropertyInfoName);
-                    }
-                    else
-                    {
-                        ret = string.Format("{0}", each.Name);
-                    }
+                    ret = string.Format("{0} AS {1}", each.Name, each.Name);
                 }
                 list.Add(ret);
             }
@@ -664,7 +646,7 @@ namespace Dapper.Aggregator
             public ColumnAttributeTypeMapper(Type t)
                 : base(new SqlMapper.ITypeMap[]
                 {
-                    new CustomPropertyTypeMap(t, FindPropertyInfo),                       
+                    new CustomPropertyTypeMap(t, FindPropertyInfo),
                     new DefaultTypeMap(t)
                 })
             {
@@ -681,6 +663,10 @@ namespace Dapper.Aggregator
                         if (columnAtt != null && string.Compare(columnAtt.Name, columnName, true) == 0) return each;
                         var columnInfo = atts.OfType<ColumnAttribute>().FirstOrDefault();
                         if (columnInfo != null && string.Compare(columnInfo.Name, columnName, true) == 0) return each;
+
+                        //エスケープ対応
+                        if (columnInfo != null && string.Compare(columnInfo.Name, string.Format("\"{0}\"", columnName), true) == 0) return each;
+                        if (columnInfo != null && string.Compare(columnInfo.Name, string.Format("'{0}'", columnName), true) == 0) return each;
                     }
                 }
                 catch
@@ -946,39 +932,50 @@ namespace Dapper.Aggregator
             Groups = new List<string>();
             CustomSelectClauses = new ColumnInfoCollection();
         }
-        public virtual string BuildSql(bool needAliasByPropertyName = true)
+        public virtual string Sql
         {
-            return string.Format("{0} {1} ", BuildSqlIgnoreOrderBy(needAliasByPropertyName), OrderByClause);
-        }
-        public virtual string BuildSqlIgnoreOrderBy(bool needAliasByPropertyName = true)
-        {
-            var sql = string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
-                 SelectTopClause, SelectClauseCollection.ToSelectClause(needAliasByPropertyName), TableClause, WhereClause, GroupByClause, HavingClause);
-
-            if (StartRecord.HasValue || MaxRecord.HasValue)
+            get
             {
-                if (!SelectClauseCollection.Any(x => x.IsPrimaryKey) && !Sorts.Any())
-                    throw new InvalidOperationException("StartRecord or MaxRecord need to set the primary key or Sort key");
-
-                sql = string.Format("SELECT ROW_NUMBER() OVER (ORDER BY {0}) AS buff_rowNum, T.* FROM ({1}) T ",
-                                    Sorts.Any() ? string.Join(",", Sorts) : string.Join(",", SelectClauseCollection.Where(x => x.IsPrimaryKey).Select(x => x.Name)),
-                                    string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
-                                        SelectTopClause, SelectClauseCollection.ToSelectClause(false), TableClause, WhereClause, GroupByClause, HavingClause));
-
-                var where = new List<string>();
-                if (StartRecord.HasValue)
-                {
-                    where.Add(string.Format("{0} <= buff_rowNum", StartRecord.Value));
-                }
-                if (MaxRecord.HasValue)
-                {
-                    where.Add(string.Format("buff_rowNum <= {0}", MaxRecord.Value));
-                }
-                sql = string.Format("SELECT {0} FROM ({1}) T WHERE {2}", SelectClauseCollection.ToSelectClause(needAliasByPropertyName), sql, string.Join(" AND ", where));
+                return string.Format("{0} {1} ", SqlIgnoreOrderBy, OrderByClause);
             }
-            return sql;
+        }
+        public virtual string SqlIgnoreOrderBy
+        {
+            get
+            {
+                var sql = string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
+                                SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause);
+
+                if (StartRecord.HasValue || MaxRecord.HasValue)
+                {
+                    if (!SelectClauseCollection.Any(x => x.IsPrimaryKey) && !Sorts.Any())
+                        throw new InvalidOperationException("StartRecord or MaxRecord need to set the primary key or Sort key");
+
+                    sql = string.Format("SELECT ROW_NUMBER() OVER (ORDER BY {0}) AS buff_rowNum, T.* FROM ({1}) T ",
+                                        Sorts.Any() ? string.Join(",", Sorts) : string.Join(",", SelectClauseCollection.Where(x => x.IsPrimaryKey).Select(x => x.Name)), sql);
+
+                    var where = new List<string>();
+                    if (StartRecord.HasValue)
+                    {
+                        where.Add(string.Format("{0} <= buff_rowNum", StartRecord.Value));
+                    }
+                    if (MaxRecord.HasValue)
+                    {
+                        where.Add(string.Format("buff_rowNum <= {0}", MaxRecord.Value));
+                    }
+                    sql = string.Format("SELECT {0} FROM ({1}) T WHERE {2}", SelectClause, sql, string.Join(" AND ", where));
+                }
+                return sql;
+            }
         }
 
+        internal protected virtual string SelectClause
+        {
+            get
+            {
+                return SelectClauseCollection.ToSelectClause();
+            }
+        }
         internal ColumnInfoCollection CustomSelectClauses { get; set; }
 
         internal protected virtual ColumnInfoCollection SelectClauseCollection
@@ -1156,9 +1153,9 @@ namespace Dapper.Aggregator
 
             for (int i = 0; i < att.ChildPropertyNames.Length; i++)
             {
-                var target = att.childPropertyAccessors[i];
+                var cpi = att.childPropertyAccessors[i];
                 var pi = att.parentPropertyAccessors[i];
-                dataParameter.Add(new DapperDataParameter(target.Att.Name, pi));
+                dataParameter.Add(new DapperDataParameter(cpi.Att.Name, pi));
             }
         }
 
@@ -1219,10 +1216,11 @@ namespace Dapper.Aggregator
                         c.View = sql;
                     }
                     sql = string.Format(" SELECT {0} FROM {1} WHERE {2}",
-                            c.Att.ChildType.GetSelectClause().ToSelectClause((i + 1) == count),
+                            c.Att.ChildType.GetSelectClause().ToSelectClause(),
                             c.Att.ChildTableName,
                             c.BuildStatement());
                 }
+
                 DapperExtensions.WriteLine(sql);
                 var rows = cnn.Query(tableType, sql, command.Parameters, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
                 result.AddRange(rows);
@@ -1366,22 +1364,28 @@ namespace Dapper.Aggregator
     public class RelationAttribute : Attribute
     {
         public RelationAttribute(Type childType, string parentPropertyName, string childPropertyName)
-            : this(childType, string.Empty, parentPropertyName, childPropertyName) { }
+            : this(childType, string.Empty, parentPropertyName, childPropertyName)
+        { }
 
         public RelationAttribute(Type childType, string key, string parentPropertyName, string childPropertyName)
-            : this(childType, key, new string[] { parentPropertyName }, new string[] { childPropertyName }) { }
+            : this(childType, key, new string[] { parentPropertyName }, new string[] { childPropertyName })
+        { }
 
         public RelationAttribute(Type childType, string[] parentPropertyName, string[] childPropertyName)
-            : this(childType, string.Empty, parentPropertyName, childPropertyName) { }
+            : this(childType, string.Empty, parentPropertyName, childPropertyName)
+        { }
 
         public RelationAttribute(Type childType, string key, string[] parentPropertyName, string[] childPropertyName)
-            : this(null, childType, key, parentPropertyName, childPropertyName) { }
+            : this(null, childType, key, parentPropertyName, childPropertyName)
+        { }
 
         public RelationAttribute(Type parentType, Type childType, string parentPropertyName, string childPropertyName)
-            : this(parentType, childType, string.Empty, new[] { parentPropertyName }, new[] { childPropertyName }) { }
+            : this(parentType, childType, string.Empty, new[] { parentPropertyName }, new[] { childPropertyName })
+        { }
 
         public RelationAttribute(Type parentType, Type childType, string[] parentPropertyName, string[] childPropertyName)
-            : this(parentType, childType, string.Empty, parentPropertyName, childPropertyName) { }
+            : this(parentType, childType, string.Empty, parentPropertyName, childPropertyName)
+        { }
 
         public RelationAttribute(Type parentType, Type childType, string key, string[] parentPropertyName, string[] childPropertyName)
         {
