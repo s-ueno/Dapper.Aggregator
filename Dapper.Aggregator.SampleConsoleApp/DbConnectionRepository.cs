@@ -34,7 +34,7 @@ namespace Dapper.Aggregator.SampleConsoleApp
     {
         public DbConnection DbConnection { get; private set; }
         protected internal string ContextName { get; internal set; }
-        protected DbTransaction Transaction { get; private set; }
+        internal DbTransaction Transaction { get; private set; }
         public DbConnectionHelper(string context)
         {
             ContextName = context;

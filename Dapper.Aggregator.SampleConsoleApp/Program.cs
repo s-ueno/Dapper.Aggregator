@@ -21,7 +21,7 @@ namespace Dapper.Aggregator.SampleConsoleApp
             TransAction(DeleteQuery);
         }
 
-        private static void AggregateWithPoco(IDbConnection sqlMapper)
+        private static void AggregateWithPoco(IDbConnection sqlMapper, IDbTransaction transaction)
         {
             var query = new Query<EventTable>();
             query.Join<EventTable, EventDetailsTable>("EventTableID", "EventTableID");
@@ -55,7 +55,7 @@ namespace Dapper.Aggregator.SampleConsoleApp
             //var rows = sqlMapper.QueryWith(query, splitLength: 1, queryOptimizerLevel: 2);
 
 
-            var rows = sqlMapper.QueryWith(query);
+            var rows = sqlMapper.QueryWith(query, transaction);
             foreach (var row in rows)
             {
                 foreach (var each in (row as IContainerHolder).Container.GetChildren<EventDetailsTable>())
@@ -67,11 +67,11 @@ namespace Dapper.Aggregator.SampleConsoleApp
             }
         }
 
-        private static void DefinedAggregatePattern(IDbConnection sqlMapper)
+        private static void DefinedAggregatePattern(IDbConnection sqlMapper, IDbTransaction transaction)
         {
             var query = new Query<DefinedAggregate>();
 
-            var rows = sqlMapper.QueryWith(query);
+            var rows = sqlMapper.QueryWith(query, transaction);
 
             foreach (var each in rows)
             {
@@ -85,7 +85,7 @@ namespace Dapper.Aggregator.SampleConsoleApp
             }
         }
 
-        private static void UpdateQuery(IDbConnection sqlMapper)
+        private static void UpdateQuery(IDbConnection sqlMapper, IDbTransaction transaction)
         {
             var query = new UpdateQuery<EventTable>();
 
@@ -95,11 +95,11 @@ namespace Dapper.Aggregator.SampleConsoleApp
             query.Filter &= query.IsNotNull(x => x.EventTableID);
             query.Filter &= query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
 
-            var ret = sqlMapper.UpdateQuery(query);
+            var ret = sqlMapper.UpdateQuery(query, transaction);
 
         }
 
-        private static void DeleteQuery(IDbConnection sqlMapper)
+        private static void DeleteQuery(IDbConnection sqlMapper, IDbTransaction transaction)
         {
             var query = new Query<DefinedAggregate>();
 
@@ -107,11 +107,11 @@ namespace Dapper.Aggregator.SampleConsoleApp
             query.Filter &= query.Expression(" EXISTS(SELECT 1 FROM EventDetailsTable WHERE EventTable.EventTableID = EventDetailsTable.EventTableID)");
 
             // tracing the relationship, and delete it from the child.
-            var ret = sqlMapper.DeleteQuery(query, isRootOnly: false);
+            var ret = sqlMapper.DeleteQuery(query, transaction, isRootOnly: false);
         }
 
 
-        public static void TransAction(Action<IDbConnection> action)
+        public static void TransAction(Action<IDbConnection, IDbTransaction> action)
         {
             using (var helper = DbConnectionRepository.CreateDbHelper())
             {
@@ -120,7 +120,7 @@ namespace Dapper.Aggregator.SampleConsoleApp
                 {
                     helper.BeginTransaction();
 
-                    action(helper.DbConnection);
+                    action(helper.DbConnection, helper.Transaction);
 
                     helper.Commit();
                 }

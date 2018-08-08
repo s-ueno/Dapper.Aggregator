@@ -892,6 +892,9 @@ namespace Dapper.Aggregator
             var parentTableName = this.TableClause;
             var childTableName = childType.GetTableName();
 
+            var parentTableAliasName = EscapeAliasFormat(parentTableName);
+            var childTableTableAliasName = EscapeAliasFormat(childTableName);
+
             if (!sourceColumn.Any() || !targetColumn.Any())
                 throw new ArgumentException("Number of Columns is required.");
 
@@ -901,14 +904,14 @@ namespace Dapper.Aggregator
             var list = new List<string>();
             for (int i = 0; i < sourceColumn.Length; i++)
             {
-                list.Add(string.Format("({0}.{1} = {2}.{3})", parentTableName, sourceColumn[i], childTableName, targetColumn[i]));
+                list.Add(string.Format("({0}.{1} = {2}.{3})", parentTableAliasName, sourceColumn[i], childTableTableAliasName, targetColumn[i]));
             }
             if (childCriteria != null)
             {
                 list.Add(childCriteria.BuildStatement());
             }
 
-            var sql = string.Format("EXISTS(SELECT 1 FROM {0} WHERE {1})", childTableName, string.Join(" AND ", list));
+            var sql = string.Format("EXISTS(SELECT 1 FROM {0} {1} WHERE {2})", childTableName, childTableTableAliasName, string.Join(" AND ", list));
             return new ExpressionCriteria(sql, childCriteria != null ? childCriteria.BuildParameters() : null);
         }
 
@@ -943,8 +946,8 @@ namespace Dapper.Aggregator
         {
             get
             {
-                var sql = string.Format("SELECT {0} {1} FROM {2} {3} {4} {5}",
-                                SelectTopClause, SelectClause, TableClause, WhereClause, GroupByClause, HavingClause);
+                var sql = string.Format("SELECT {0} {1} FROM {2} {3} {4} {5} {6}",
+                                SelectTopClause, SelectClause, TableClause, EscapeAliasFormat(TableClause), WhereClause, GroupByClause, HavingClause);
 
                 if (StartRecord.HasValue || MaxRecord.HasValue)
                 {
@@ -990,6 +993,13 @@ namespace Dapper.Aggregator
         public string SelectTopClause { get; set; }
 
         internal protected virtual string TableClause { get { return RootType.GetTableName(); } }
+
+        internal protected virtual string EscapeAliasFormat(string s)
+        {
+            s = s.Replace("\"", "\"\"");
+            return $"\"{s}\"";
+        }
+
         internal protected virtual string WhereClause
         {
             get
@@ -1117,7 +1127,7 @@ namespace Dapper.Aggregator
                 if (each.ParentType == null)
                     each.ParentType = RootType;
 
-                each.Ensure();
+                each.Ensure(this);
                 if (injectionDynamicType)
                     each.EnsureDynamicType();
                 each.DataAdapter.SplitCount = splitCount;
@@ -1186,6 +1196,7 @@ namespace Dapper.Aggregator
             var newTableType = ILGeneratorUtil.IsInjected(tableType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(tableType) : tableType;
 
             var tableName = relationAttribute.ChildTableName;
+            var tableAliasName = relationAttribute.ChildAliasTableName;
             var clause = newTableType.GetSelectClause().ToSelectClause();
             var splitCriteria = SplitCriteria();
 
@@ -1217,9 +1228,10 @@ namespace Dapper.Aggregator
                     {
                         c.View = sql;
                     }
-                    sql = string.Format(" SELECT {0} FROM {1} WHERE {2}",
+                    sql = string.Format(" SELECT {0} FROM {1} {2} WHERE {3}",
                             c.Att.ChildType.GetSelectClause().ToSelectClause(),
                             c.Att.ChildTableName,
+                            c.Att.ChildAliasTableName,
                             c.BuildStatement());
                 }
 
@@ -1234,7 +1246,7 @@ namespace Dapper.Aggregator
                 {
                     var statement = each.BuildStatement();
                     var param = each.BuildParameters();
-                    var sql = string.Format("SELECT {0} FROM {1} WHERE {2} ", clause, tableName, statement);
+                    var sql = string.Format("SELECT {0} FROM {1} {2} WHERE {3} ", clause, tableName, tableAliasName, statement);
 
                     DapperExtensions.WriteLine(sql);
                     var rows = cnn.Query(newTableType, sql, param, command.Transaction, command.Buffered, command.CommandTimeout, command.CommandType);
@@ -1403,7 +1415,9 @@ namespace Dapper.Aggregator
         public string[] ChildPropertyNames { get; private set; }
         public string Key { get; private set; }
         public string ParentTableName { get; private set; }
+        public string ParentAliasTableName { get; private set; }
         public string ChildTableName { get; private set; }
+        public string ChildAliasTableName { get; private set; }
 
         //[NonSerialized]
         internal List<PropertyAccessorImp> parentPropertyAccessors = new List<PropertyAccessorImp>();
@@ -1411,14 +1425,16 @@ namespace Dapper.Aggregator
         internal List<PropertyAccessorImp> childPropertyAccessors = new List<PropertyAccessorImp>();
 
         internal bool Loaded { get; set; }
-        public void Ensure()
+        public void Ensure(QueryImp query)
         {
             if (string.IsNullOrWhiteSpace(Key))
             {
                 Key = CreateDefaultKey(ParentType, ChildType);
             }
             ParentTableName = ParentType.GetTableName();
+            ParentAliasTableName = query.EscapeAliasFormat(ParentTableName);
             ChildTableName = ChildType.GetTableName();
+            ChildAliasTableName = query.EscapeAliasFormat(ChildTableName);
 
             var parentProperties = PropertyAccessorImp.ToPropertyAccessors(ParentType);
             var childProperties = PropertyAccessorImp.ToPropertyAccessors(ChildType);
@@ -1906,12 +1922,12 @@ namespace Dapper.Aggregator
                 var parentProperty = Att.parentPropertyAccessors[i];
                 var childProperty = Att.childPropertyAccessors[i];
 
-                list.Add(string.Format(" {0}.{1} = {2}.{3}", Att.ParentTableName, parentProperty.Att.Name, Att.ChildTableName, childProperty.Att.Name));
+                list.Add(string.Format(" {0}.{1} = {2}.{3}", Att.ParentAliasTableName, parentProperty.Att.Name, Att.ChildAliasTableName, childProperty.Att.Name));
             }
 
             sql = string.Format(" EXISTS(SELECT 1 FROM {0} {1} WHERE {2})",
                 string.IsNullOrWhiteSpace(View) ? string.Empty : string.Format("({0})", View),
-                Att.ParentTableName,
+                Att.ParentAliasTableName,
                 string.Join(" AND ", list));
 
             return sql;
