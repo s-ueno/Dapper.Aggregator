@@ -1,0 +1,21 @@
+﻿<?xml version="1.0"?>
+<package >
+  <metadata>
+    <id>Dapper.Aggregator</id>
+    <version>1.0.0</version>
+    <title>Dapper.Aggregator</title>
+    <authors>uEN</authors>
+    <licenseUrl>https://github.com/s-ueno/Dapper.Aggregator/blob/master/License.txt</licenseUrl>
+    <projectUrl>https://github.com/s-ueno/Dapper.Aggregator</projectUrl>
+    <tags>dapper orm</tags>
+    <description>
+      Type-safe Dapper built with "Filter Pattern"
+    </description>
+    <releaseNotes>
+		
+    </releaseNotes>
+    <dependencies>
+      <dependency id="Dapper" version="1.50.5"></dependency>
+    </dependencies>
+  </metadata> 
+</package>
