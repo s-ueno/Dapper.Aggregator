@@ -2,13 +2,29 @@
 
   <PropertyGroup>
     <TargetFramework>netstandard2.0</TargetFramework>
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <Version>2.0.3</Version>
+    <Description>Type-safe Dapper built with "Criteria Pattern"</Description>
+    <Copyright></Copyright>
+    <Authors>uEN</Authors>
+    <Company />
+    <Product />
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/s-ueno/Dapper.Aggregator</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/s-ueno/Dapper.Aggregator</RepositoryUrl>
+    <PackageTags>dapper orm</PackageTags>
+    <PackageReleaseNotes>.Net Standard</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Dapper" Version="2.0.78" />
-    <PackageReference Include="Microsoft.CSharp" Version="4.7.0" />
-    <PackageReference Include="System.Dynamic.Runtime" Version="4.3.0" />
     <PackageReference Include="System.Reflection.Emit" Version="4.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="nuget.exe">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>
