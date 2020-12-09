@@ -570,8 +570,8 @@ namespace Dapper.Aggregator
         private static readonly ConcurrentDictionary<Type, Type> TypeCache = new ConcurrentDictionary<Type, Type>();
         static ILGeneratorUtil()
         {
-            var assemblyName = new AssemblyName(Guid.NewGuid().ToString());
-            dynamicAssemblyBuilder = System.Threading.Thread.GetDomain().DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
+            var assemblyName = new AssemblyName(Guid.NewGuid().ToString());            
+            dynamicAssemblyBuilder = AssemblyBuilder.DefineDynamicAssembly(assemblyName, AssemblyBuilderAccess.Run);
         }
         private static readonly AssemblyBuilder dynamicAssemblyBuilder;
 
@@ -599,7 +599,7 @@ namespace Dapper.Aggregator
             {
                 BuildProperty(typeBuilder, each.Name, each.PropertyType);
             }
-            buildType = typeBuilder.CreateType();
+            buildType = typeBuilder.CreateTypeInfo();
             TypeCache[targetType] = buildType;
 
             ValidColumnTypeMap(targetType);
