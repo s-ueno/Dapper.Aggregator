@@ -152,17 +152,11 @@ namespace Dapper.Aggregator
                     name = name.Substring(1);
 
                 //NOTE: This as dynamic trick should be able to handle both our own Table-attribute as well as the one in EntityFramework 
-                var tableattr = type.GetCustomAttributes(false).Where(attr => attr.GetType().Name == "TableAttribute").SingleOrDefault() as dynamic;
+                var tableattr = type.GetCustomAttributes<TableAttribute>(true).SingleOrDefault();
                 if (tableattr != null)
                 {
                     name = tableattr.Name;
-                }
-                else
-                {
-                    tableattr = type.GetCustomAttributes(true).Where(attr => attr.GetType().Name == "TableAttribute").SingleOrDefault() as dynamic;
-                    if (tableattr != null)
-                        name = tableattr.Name;
-                }
+                }                
                 TypeTableName[type.TypeHandle] = name;
             }
             return name;
@@ -195,64 +189,14 @@ namespace Dapper.Aggregator
             ret.Name = pi.Name;
             ret.PropertyInfoName = pi.Name;
 
-            var allAtts = pi.GetCustomAttributes(false).ToArray();
+            var allAtts = pi.GetCustomAttributes(true).ToArray();
             var cInfo = allAtts.OfType<ColumnAttribute>().FirstOrDefault();
             if (cInfo != null)
             {
                 cInfo.PropertyInfoName = pi.Name;
                 return cInfo;
             }
-
-            //recommend  System.Data.Linq.Mapping.ColumnAttribute. but It should be only Name property.
-            var columnAtt = allAtts.SingleOrDefault(x => x.GetType().Name == "ColumnAttribute") as dynamic;
-            if (columnAtt != null)
-            {
-                SetColumnInfoFromColumnAttribute(ret, columnAtt);
-            }
-            var dcc = allAtts.SingleOrDefault(x => x.GetType().FullName == "Dapper.Contrib.Extensions.ComputedAttribute");
-            if (dcc != null)
-            {
-                ret.Ignore = true;
-            }
-            var key = allAtts.SingleOrDefault(x => x.GetType().FullName == "Dapper.Contrib.Extensions.KeyAttribute");
-            if (dcc != null)
-            {
-                ret.IsPrimaryKey = true;
-            }
             return ret;
-        }
-        private static void SetColumnInfoFromColumnAttribute(ColumnAttribute info, dynamic att)
-        {
-            if (att == null) return;
-            try
-            {
-                info.Name = att.Name;
-            }
-            catch { }
-
-            try
-            {
-                info.Expression = att.Expression as string;
-            }
-            catch { }
-
-            try
-            {
-                info.IsPrimaryKey = (bool)att.IsPrimaryKey;
-            }
-            catch { }
-
-            try
-            {
-                info.IsVersion = (bool)att.IsVersion;
-            }
-            catch { }
-
-            try
-            {
-                info.DbType = att.DbType as string;
-            }
-            catch { }
         }
 
         public static ColumnAttribute ToColumnInfo(this Expression expr)
@@ -658,8 +602,8 @@ namespace Dapper.Aggregator
                     var properties = t.GetProperties(BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static).ToArray();
                     foreach (var each in properties)
                     {
-                        var atts = each.GetCustomAttributes(false).ToArray();
-                        var columnAtt = atts.SingleOrDefault(x => x.GetType().Name == "ColumnAttribute") as dynamic;
+                        var atts = each.GetCustomAttributes<ColumnAttribute>(true).ToArray();
+                        var columnAtt = atts.SingleOrDefault();
                         if (columnAtt != null && string.Compare(columnAtt.Name, columnName, true) == 0) return each;
                         var columnInfo = atts.OfType<ColumnAttribute>().FirstOrDefault();
                         if (columnInfo != null && string.Compare(columnInfo.Name, columnName, true) == 0) return each;
