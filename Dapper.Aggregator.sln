@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.30503.244
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31710.8
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Dapper.Aggregator", "Dapper.Aggregator\Dapper.Aggregator.csproj", "{E5CE9B74-C868-429A-840E-4F60D461F118}"
 EndProject
@@ -20,9 +20,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ExternalFiles", "ExternalFi
 		ExternalFiles\System.Data.SqlServerCe.dll = ExternalFiles\System.Data.SqlServerCe.dll
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregator.SampleConsoleApp", "Dapper.Aggregator.SampleConsoleApp\Dapper.Aggregator.SampleConsoleApp.csproj", "{B6FAF935-AF52-423C-A86E-4619DBA862F6}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{B530995D-527E-4997-8E9F-6E2D3E942E55}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregator.Net6ConsoleApp", "Dapper.Aggregator.Net6ConsoleApp\Dapper.Aggregator.Net6ConsoleApp.csproj", "{1C746AF4-FEEA-4258-82EC-245ECCA3D855}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -34,10 +34,10 @@ Global
 		{E5CE9B74-C868-429A-840E-4F60D461F118}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{E5CE9B74-C868-429A-840E-4F60D461F118}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{E5CE9B74-C868-429A-840E-4F60D461F118}.Release|Any CPU.Build.0 = Release|Any CPU
-		{B6FAF935-AF52-423C-A86E-4619DBA862F6}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{B6FAF935-AF52-423C-A86E-4619DBA862F6}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{B6FAF935-AF52-423C-A86E-4619DBA862F6}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{B6FAF935-AF52-423C-A86E-4619DBA862F6}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1C746AF4-FEEA-4258-82EC-245ECCA3D855}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1C746AF4-FEEA-4258-82EC-245ECCA3D855}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1C746AF4-FEEA-4258-82EC-245ECCA3D855}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1C746AF4-FEEA-4258-82EC-245ECCA3D855}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

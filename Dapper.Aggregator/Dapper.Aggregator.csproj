@@ -1,9 +1,9 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.0</TargetFramework>
+    <TargetFramework>net6.0</TargetFramework>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>2.0.3</Version>
+    <Version>6.0.0</Version>
     <Description>Type-safe Dapper built with "Criteria Pattern"</Description>
     <Copyright></Copyright>
     <Authors>uEN</Authors>
@@ -13,11 +13,12 @@
     <PackageProjectUrl>https://github.com/s-ueno/Dapper.Aggregator</PackageProjectUrl>
     <RepositoryUrl>https://github.com/s-ueno/Dapper.Aggregator</RepositoryUrl>
     <PackageTags>dapper orm</PackageTags>
-    <PackageReleaseNotes>.Net Standard</PackageReleaseNotes>
+    <PackageReleaseNotes>.Net 6</PackageReleaseNotes>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Dapper" Version="2.0.78" />
+    <PackageReference Include="Dapper" Version="2.0.123" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="6.0.0" />
     <PackageReference Include="System.Reflection.Emit" Version="4.7.0" />
   </ItemGroup>
 
