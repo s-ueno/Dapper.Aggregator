@@ -379,6 +379,7 @@ namespace Dapper.Aggregator
                         whereList.Add(whereClauses);
                     }
 
+                    // todo 遅すぎるのて temp table を使う
                     var sql = string.Format("UPDATE {0} SET {1} WHERE {2} ;", table,
                                 string.Join(",", setList.Select(x => x.Clauses)),
                                 string.Join(" AND ", whereList.Select(x => x.Clauses)));
