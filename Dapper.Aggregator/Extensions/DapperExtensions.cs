@@ -21,23 +21,28 @@ namespace Dapper.Aggregator
 
         #region FindAsync
 
-        async public static Task<IEnumerable<T>> FindAsync<T>(this IDbConnection cnn, Query<T> query,
-            IDbTransaction transaction = null, int? commandTimeout = null, int splitLength = 100, int queryOptimizerLevel = 10)
+        async public static Task<IEnumerable<T>> FindAsync<T>(this IDbConnection cnn, Query<T> query, IDbTransaction transaction = null)
         {
             using var activity = _activitySource.StartActivity("FindAsync", ActivityKind.Internal);
             activity?.AddTag("Sql", query.Sql);
 
-            query.Ensure(splitLength, queryOptimizerLevel);
+            query.Ensure();
 
             var oldType = query.RootType;
             var newParentType = ILGeneratorUtil.IsInjected(oldType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(oldType) : oldType;
 
-            var rows = await cnn.QueryAsync(newParentType, query.Sql, query.Parameters, transaction, commandTimeout);
+            var rows = await cnn.QueryAsync(newParentType, query.Sql, query.Parameters, transaction, query.Timeout);
             if (rows != null && rows.Any())
             {
-                var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, commandTimeout);
+                var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, query.Timeout);
                 await LoadAsync(cnn, command, newParentType, query.Relations.ToArray(), rows);
             }
+
+            if (activity?.IsAllDataRequested == true)
+            {
+                activity?.AddTag("Result Count", rows.Count());
+            }
+
             return rows.OfType<T>();
         }
 
@@ -80,12 +85,16 @@ namespace Dapper.Aggregator
 
         #region ScalarAsync
 
-        async public static Task<T> ScalarAsync<T>(this IDbConnection cnn, QueryImp query, IDbTransaction transaction = null, int? commandTimeout = null)
+        async public static Task<T> ScalarAsync<T>(this IDbConnection cnn, QueryImp query, IDbTransaction transaction = null)
         {
             using var activity = _activitySource.StartActivity("ScalarWith", ActivityKind.Internal);
             activity?.AddTag("Sql", query.Sql);
 
-            return await cnn.ExecuteScalarAsync<T>(query.Sql, query.Parameters, transaction, commandTimeout, CommandType.Text);
+            var result = await cnn.ExecuteScalarAsync<T>(query.Sql, query.Parameters, transaction, query.Timeout, CommandType.Text);
+
+            activity?.AddTag("Result", result);
+
+            return result;
         }
 
         #endregion
@@ -93,7 +102,7 @@ namespace Dapper.Aggregator
         #region DeleteQueryAsync
 
         async public static Task<int> DeleteQueryAsync(this IDbConnection cnn, QueryImp query,
-            IDbTransaction transaction = null, int? commandTimeout = null, bool isRootOnly = true)
+            IDbTransaction transaction = null, bool isRootOnly = true)
         {
             using var activity = _activitySource.StartActivity("DeleteQuery", ActivityKind.Internal);
 
@@ -113,11 +122,15 @@ namespace Dapper.Aggregator
                 }
                 foreach (var each in list.OrderByDescending(x => x.NestLevel))
                 {
-                    cnn.Execute(each.DeleteClause, query.Parameters, transaction, commandTimeout);
+                    cnn.Execute(each.DeleteClause, query.Parameters, transaction, query.Timeout);
                 }
             }
             var rootDeleteSql = string.Format("DELETE FROM {0} {1}", query.TableClause, query.WhereClause);
-            return await cnn.ExecuteAsync(rootDeleteSql, query.Parameters, transaction, commandTimeout);
+            var effect = await cnn.ExecuteAsync(rootDeleteSql, query.Parameters, transaction, query.Timeout);
+
+            activity?.AddTag("Effect", effect);
+
+            return effect;
         }
 
         private static void RecursiveDeleteQuery(List<RelationAttribute> atts, List<DeleteQueryObject> items, DeleteQueryObject rd)
@@ -138,20 +151,23 @@ namespace Dapper.Aggregator
 
         #region UpdateQueryAsync
 
-        async public static Task<int> UpdateQueryAsync<T>(this IDbConnection cnn, UpdateQuery<T> query,
-            IDbTransaction transaction = null, int? commandTimeout = null)
+        async public static Task<int> UpdateQueryAsync<T>(this IDbConnection cnn, UpdateQuery<T> query, IDbTransaction transaction = null)
         {
             using var activity = _activitySource.StartActivity("UpdateQuery", ActivityKind.Internal);
             activity?.AddTag("Sql", query.UpdateClauses);
 
-            return await cnn.ExecuteAsync(query.UpdateClauses, query.Parameters, transaction, commandTimeout);
+            var effect = await cnn.ExecuteAsync(query.UpdateClauses, query.Parameters, transaction, query.Timeout);
+
+            activity?.AddTag("Effect", effect);
+
+            return effect;
         }
 
         #endregion
 
         #region CreateIfNotExistsTableAsync
 
-        async public static Task<int> CreateIfNotExistsTableAsync<T>(this IDbConnection cnn, IDbTransaction transaction = null, int? commandTimeout = null)
+        async public static Task<int> CreateIfNotExistsTableAsync<T>(this IDbConnection cnn, IDbTransaction transaction = null)
         {
             var type = typeof(T);
             var table = type.GetTableName();
@@ -186,7 +202,7 @@ namespace Dapper.Aggregator
             using var activity = _activitySource.StartActivity("CreateIfNotExistsTableAsync", ActivityKind.Internal);
             activity?.AddTag("Sql", sb.ToString());
 
-            return await cnn.ExecuteAsync(sb.ToString(), null, transaction, commandTimeout);
+            return await cnn.ExecuteAsync(sb.ToString(), null, transaction);
         }
 
         private static string toDDLColumn(ColumnAttribute column)
@@ -207,24 +223,32 @@ namespace Dapper.Aggregator
 
         #region CountAsync
 
-        async public static Task<int> CountAsync<T>(this IDbConnection cnn, Query<T> query)
+        async public static Task<int> CountAsync<T>(this IDbConnection cnn, Query<T> query, IDbTransaction transaction = null)
         {
             var sql = string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy);
 
             using var activity = _activitySource.StartActivity("Count", ActivityKind.Internal);
             activity?.AddTag("Sql", sql);
 
-            return await cnn.ExecuteScalarAsync<int>(sql, query.Parameters);
+            var count = await cnn.ExecuteScalarAsync<int>(sql, query.Parameters, transaction, query.Timeout);
+
+            activity?.AddTag("Count", count);
+
+            return count;
         }
 
-        async public static Task<TResult> CountAsync<TResult>(this IDbConnection cnn, QueryImp query)
+        async public static Task<TResult> CountAsync<TResult>(this IDbConnection cnn, QueryImp query, IDbTransaction transaction = null)
         {
             var sql = string.Format("SELECT COUNT(1) FROM ({0}) T", query.SqlIgnoreOrderBy);
 
             using var activity = _activitySource.StartActivity("Count", ActivityKind.Internal);
             activity?.AddTag("Sql", sql);
 
-            return await cnn.ExecuteScalarAsync<TResult>(sql, query.Parameters);
+            var count = await cnn.ExecuteScalarAsync<TResult>(sql, query.Parameters, transaction, query.Timeout);
+
+            activity?.AddTag("Count", count);
+
+            return count;
         }
 
         #endregion
@@ -240,8 +264,6 @@ namespace Dapper.Aggregator
         async public static Task<int> BulkInsertAsync<T>(this IDbConnection cnn, IEnumerable<T> entities,
             IDbTransaction transaction = null, int maximumParameterizedCount = 1000, int? commandTimeout = null)
         {
-            using var activity = _activitySource.StartActivity("BulkInsertAsync", ActivityKind.Internal);
-
             var type = typeof(T);
             var table = type.GetTableName();
 
@@ -251,6 +273,8 @@ namespace Dapper.Aggregator
         async internal static Task<int> BulkInsertRawAsync<T>(this IDbConnection cnn, IEnumerable<T> entities,
                     IDbTransaction transaction, int maximumParameterizedCount, int? commandTimeout, string tableName, bool ignoreUpdateVersion = false)
         {
+            using var activity = _activitySource.StartActivity("BulkInsertAsync", ActivityKind.Internal);
+
             if (entities == null || !entities.Any())
                 throw new ArgumentNullException("entities");
 
@@ -307,6 +331,9 @@ namespace Dapper.Aggregator
                 var sql = string.Format("INSERT INTO {0} ({1}) VALUES {2} ;", table, string.Join(",", columns.Where(x => !x.Ignore).Select(x => x.Name)), string.Join(",", parameterizedValues));
                 result += await cnn.ExecuteAsync(sql, dic, transaction, commandTimeout);
             }
+
+            activity?.AddTag("Effect", result);
+
             return result;
         }
 
@@ -366,6 +393,9 @@ namespace Dapper.Aggregator
             if (ret != entities.Count())
                 throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
 
+            activity?.AddTag("Effect", ret);
+
+
             // update version check
             var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
             if (!versionPolicy.Any()) versionPolicy = new[] { new DefalutVersionPolicy() };
@@ -409,6 +439,8 @@ namespace Dapper.Aggregator
                 ret = await cnn.ExecuteAsync(versionUpSql, new Dictionary<string, object>() { { "@p1", maxVersion } }, transaction, commandTimeout);
                 if (ret != entities.Count())
                     throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+
+                activity?.AddTag("Effect", ret);
             }
 
             // drop temp table
@@ -467,6 +499,8 @@ namespace Dapper.Aggregator
             if (ret != entities.Count())
                 throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
 
+            activity?.AddTag("Effect", ret);
+
             // drop temp table
             await cnn.ExecuteAsync($"DROP TABLE {tempTableName}", null, transaction, commandTimeout);
         }
@@ -477,6 +511,8 @@ namespace Dapper.Aggregator
 
         async public static Task TruncateAsync<T>(this IDbConnection cnn, IDbTransaction transaction = null, int? commandTimeout = null)
         {
+            using var activity = _activitySource.StartActivity("TruncateAsync", ActivityKind.Internal);
+
             var type = typeof(T);
             var table = type.GetTableName().EscapeAliasFormat();
             await cnn.ExecuteAsync($"TRUNCATE TABLE {table}", null, transaction, commandTimeout);
@@ -488,6 +524,8 @@ namespace Dapper.Aggregator
 
         async public static Task DropIfExistsTableAsync<T>(this IDbConnection cnn, IDbTransaction transaction = null, int? commandTimeout = null)
         {
+            using var activity = _activitySource.StartActivity("DropIfExistsTableAsync", ActivityKind.Internal);
+
             var type = typeof(T);
             var table = type.GetTableName().EscapeAliasFormat();
             await cnn.ExecuteAsync($"DROP TABLE IF EXISTS {table}", null, transaction, commandTimeout);
@@ -495,8 +533,7 @@ namespace Dapper.Aggregator
 
         #endregion
 
-        #region 
-        #endregion
+
 
     }
 }

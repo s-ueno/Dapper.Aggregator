@@ -1,15 +1,23 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
 namespace Dapper.Aggregator
-{
+{   
     [Serializable]
-    [AttributeUsage(AttributeTargets.Property)]
+    [AttributeUsage(AttributeTargets.Property, Inherited = false, AllowMultiple = false)]
     public class ColumnAttribute : Attribute
     {
+        private readonly int _order;
+        public ColumnAttribute([CallerLineNumber] int order = 0) 
+        {
+            _order = order;
+        }
+        public int Order { get { return _order; } }
+
         public string Name { get; set; }
         public string DDLType { get; set; }
         public string PropertyInfoName { get; set; }

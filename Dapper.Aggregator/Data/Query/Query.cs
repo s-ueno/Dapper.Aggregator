@@ -15,6 +15,20 @@ namespace Dapper.Aggregator
             Relations.AddRange(atts);
         }
 
+        public Query<Root> PrimaryKeyFilter(params object[] primaryKeys)
+        {
+            var pk = typeof(Root).GetSelectClause().Where(x => x.IsPrimaryKey).OrderBy(x => x.Order).ToArray();
+            if (!pk.Any()) throw new InvalidOperationException("need PrimaryKey");
+
+            for (int i = 0; i < pk.Length; i++)
+            {
+                var column = pk[i];
+                this.Filter &= new IdCriteria(primaryKeys[i], column.Name, ++CriteriaIndex);
+            }
+
+            return this;
+        }
+
         public Criteria Eq<P>(Expression<Func<Root, P>> property, P obj)
         {
             return new IdCriteria(obj, property.ToColumnInfo().Name, ++CriteriaIndex);

@@ -4,10 +4,13 @@ using Dapper.Aggregator.Net6ConsoleApp.Model;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System.Data;
-
+using System.Reflection;
+using System.Linq;
 
 var startup = new Startup();
 IServiceProvider provider = startup.Ensure();
+
+
 
 
 var codeList = Enumerable.Range(0, 1000000 /* million */).Select(i =>

@@ -62,6 +62,8 @@ namespace Dapper.Aggregator
 
         async public Task<List<object>> FillAsync(IDbConnection cnn, CommandDefinition command, RelationAttribute[] atts)
         {
+            using var activity = DapperExtensions._activitySource.StartActivity("FillAsync", ActivityKind.Internal);
+
             var result = new List<object>();
             var tableType = relationAttribute.ChildType;
             var newTableType = ILGeneratorUtil.IsInjected(tableType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(tableType) : tableType;
@@ -106,8 +108,6 @@ namespace Dapper.Aggregator
                             c.BuildStatement());
                 }
 
-
-                using var activity = DapperExtensions._activitySource.StartActivity("Fill", ActivityKind.Internal);
                 activity?.AddTag("Sql", sql);
 
                 var rows = await cnn.QueryAsync(newTableType, sql, command.Parameters, command.Transaction, command.CommandTimeout, command.CommandType);
@@ -122,13 +122,18 @@ namespace Dapper.Aggregator
                     var param = each.BuildParameters();
                     var sql = string.Format("SELECT {0} FROM {1} {2} WHERE {3} ", clause, tableName, tableAliasName, statement);
 
-                    using var activity = DapperExtensions._activitySource.StartActivity("Fill", ActivityKind.Internal);
                     activity?.AddTag("Sql", sql);
 
                     var rows = await cnn.QueryAsync(newTableType, sql, param, command.Transaction, command.CommandTimeout, command.CommandType);
                     result.AddRange(rows);
                 }
             }
+
+            if (activity?.IsAllDataRequested == true)
+            {
+                activity?.AddTag("Fill Count", result.Count);
+            }
+
             return result;
         }
 

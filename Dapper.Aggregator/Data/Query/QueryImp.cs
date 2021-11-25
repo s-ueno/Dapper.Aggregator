@@ -15,6 +15,11 @@ namespace Dapper.Aggregator
 
         public int? StartRecord { get; set; }
         public int? MaxRecord { get; set; }
+        public int Timeout { get; set; } = 0; 
+
+        public int SplitLength { get; set; } = 100;
+
+        public int OptimizerDataCount { get; set; } = 10;
 
         public List<RelationAttribute> Relations { get; private set; }
         public List<string> Sorts { get; private set; }
@@ -211,6 +216,10 @@ namespace Dapper.Aggregator
             return this;
         }
 
+        public void Ensure()
+        {
+            Ensure(this.SplitLength, this.OptimizerDataCount);
+        }
         public void Ensure(int splitCount = 100, int optimizerLevel = 10, bool injectionDynamicType = true)
         {
             foreach (var each in Relations)
