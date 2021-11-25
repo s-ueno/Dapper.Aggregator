@@ -28,7 +28,8 @@ namespace Dapper.Aggregator.Net6ConsoleApp
 
             IConfiguration configuration = new ConfigurationBuilder()
                  .SetBasePath(Directory.GetCurrentDirectory())
-                 .AddJsonFile($"appsettings.json")
+                 .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                 .AddJsonFile($"appsettings.Development.json", optional: true)
                  .AddEnvironmentVariables()
                  .Build();
             services.AddSingleton(configuration);

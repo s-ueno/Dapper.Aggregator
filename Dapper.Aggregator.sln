@@ -21,8 +21,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "ExternalFiles", "ExternalFi
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{B530995D-527E-4997-8E9F-6E2D3E942E55}"
+	ProjectSection(SolutionItems) = preProject
+		.gitignore = .gitignore
+	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dapper.Aggregator.Net6ConsoleApp", "Dapper.Aggregator.Net6ConsoleApp\Dapper.Aggregator.Net6ConsoleApp.csproj", "{1C746AF4-FEEA-4258-82EC-245ECCA3D855}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Dapper.Aggregator.Net6ConsoleApp", "Dapper.Aggregator.Net6ConsoleApp\Dapper.Aggregator.Net6ConsoleApp.csproj", "{1C746AF4-FEEA-4258-82EC-245ECCA3D855}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

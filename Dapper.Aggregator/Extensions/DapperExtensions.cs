@@ -32,13 +32,13 @@ namespace Dapper.Aggregator
             var oldType = query.RootType;
             var newParentType = ILGeneratorUtil.IsInjected(oldType) ? ILGeneratorUtil.InjectionInterfaceWithProperty(oldType) : oldType;
 
-            var rows = await cnn.QueryAsync<T>(query.Sql, query.Parameters, transaction, commandTimeout);
+            var rows = await cnn.QueryAsync(newParentType, query.Sql, query.Parameters, transaction, commandTimeout);
             if (rows != null && rows.Any())
             {
                 var command = new CommandDefinition(query.SqlIgnoreOrderBy, query.Parameters, transaction, commandTimeout);
                 await LoadAsync(cnn, command, newParentType, query.Relations.ToArray(), rows);
             }
-            return rows;
+            return rows.OfType<T>();
         }
 
         async private static Task LoadAsync(IDbConnection cnn, CommandDefinition command, Type t, RelationAttribute[] atts, System.Collections.IEnumerable roots)
@@ -242,15 +242,26 @@ namespace Dapper.Aggregator
         {
             using var activity = _activitySource.StartActivity("BulkInsertAsync", ActivityKind.Internal);
 
+            var type = typeof(T);
+            var table = type.GetTableName();
+
+            return await BulkInsertRawAsync<T>(cnn, entities, transaction, maximumParameterizedCount, commandTimeout, table);
+        }
+
+        async internal static Task<int> BulkInsertRawAsync<T>(this IDbConnection cnn, IEnumerable<T> entities,
+                    IDbTransaction transaction, int maximumParameterizedCount, int? commandTimeout, string tableName, bool ignoreUpdateVersion = false)
+        {
             if (entities == null || !entities.Any())
                 throw new ArgumentNullException("entities");
 
             var type = typeof(T);
-            var table = type.GetTableName();
+            var table = tableName.EscapeAliasFormat();
             var columns = type.GetSelectClause().ToArray();
             var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
             var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
             var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
+            if (!versionPolicy.Any()) versionPolicy = new[] { new DefalutVersionPolicy() };
+
 
             var result = 0;
             var chunkSize = Math.Max(maximumParameterizedCount / columns.Length, 1);
@@ -278,7 +289,7 @@ namespace Dapper.Aggregator
                         if (column.Ignore) continue;
 
                         var value = accessors[column.PropertyInfoName].GetValue(entity);
-                        if (column.IsVersion)
+                        if (column.IsVersion && !ignoreUpdateVersion)
                         {
                             foreach (var policy in versionPolicy)
                             {
@@ -296,10 +307,9 @@ namespace Dapper.Aggregator
                 var sql = string.Format("INSERT INTO {0} ({1}) VALUES {2} ;", table, string.Join(",", columns.Where(x => !x.Ignore).Select(x => x.Name)), string.Join(",", parameterizedValues));
                 result += await cnn.ExecuteAsync(sql, dic, transaction, commandTimeout);
             }
-
-
             return result;
         }
+
 
         #endregion
 
@@ -324,72 +334,85 @@ namespace Dapper.Aggregator
             var columns = type.GetSelectClause().ToArray();
             if (!columns.Any(x => x.IsPrimaryKey))
                 throw new System.Data.MissingPrimaryKeyException("should have a primary key.");
-
-            var setColumns = columns.Where(x => !x.IsPrimaryKey && !x.Ignore).ToArray();
-            var whereColumns = columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore).ToArray();
-
-            var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
-            var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
-            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
-
-            var chunkSize = Math.Max(maximumParameterizedCount / (setColumns.Length + whereColumns.Length), 1);
-            foreach (var group in entities.Chunk(chunkSize))
+            if (!columns.All(x =>
+                !String.IsNullOrWhiteSpace(x.Name) &&
+                !String.IsNullOrWhiteSpace(x.DDLType)
+            ))
             {
-                var items = group.ToArray();
-                var dic = new Dictionary<string, object>();
-                var sqlList = new List<string>();
-                var clausesIndex = 0;
-                for (int i = 0; i < items.Length; i++)
-                {
-                    var entity = items[i];
-                    foreach (var validator in validators)
-                    {
-                        var validateError = validator.GetError(entity);
-                        if (validateError != null)
-                        {
-                            throw validateError;
-                        }
-                    }
+                throw new InvalidOperationException("Add Name and DDLType to the ColumnAttribute.");
+            }
 
-                    var setList = new List<SetClausesHolder>();
-                    clausesIndex += 1;
-                    foreach (var column in setColumns)
+            var whereColumns = columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore).ToArray();
+            var setColumns = columns.Where(x => !x.IsPrimaryKey && !x.Ignore).ToArray();
+
+            // CREATE TABLE TABLE
+            var tempTableName = $"t_{Guid.NewGuid().ToString().Replace('-', '_').ToLower()}";
+            var ddlColumns = columns.Select(x => toDDLColumn(x));
+            var sb = new StringBuilder();
+            sb.AppendLine($"CREATE TEMP TABLE {tempTableName}(");
+            sb.AppendLine($"{String.Join(",", ddlColumns)}");
+            sb.AppendLine($")");
+            await cnn.ExecuteAsync(sb.ToString(), null, transaction, commandTimeout);
+
+            // BULK INSERT TO TEMP TABLE
+            await BulkInsertRawAsync<T>(cnn, entities, transaction, maximumParameterizedCount, commandTimeout, tempTableName, true);
+
+            // transfer table from temptable
+            var whereClauses = whereColumns.Select(x => $"{table}.{x.Name} = {tempTableName}.{x.Name}");
+            var setClauses = setColumns.Select(x => $"{x.Name} = {tempTableName}.{x.Name}");
+            var transferSql = $"UPDATE {table} SET {string.Join(",", setClauses)} FROM {tempTableName} where {string.Join(" AND ", whereClauses)}";
+
+            var ret = await cnn.ExecuteAsync(transferSql, null, transaction, commandTimeout);
+            if (ret != entities.Count())
+                throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+
+            // update version check
+            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
+            if (!versionPolicy.Any()) versionPolicy = new[] { new DefalutVersionPolicy() };
+
+            var versionColumns = columns.Where(x => x.IsVersion).ToArray();
+            object maxVersion = null;
+            if (versionColumns.Any() && versionPolicy != null)
+            {
+                var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
+                foreach (var entity in entities)
+                {
+                    foreach (var column in versionColumns)
                     {
                         var value = accessors[column.PropertyInfoName].GetValue(entity);
-                        if (column.IsVersion)
+                        foreach (var policy in versionPolicy)
                         {
-                            foreach (var policy in versionPolicy)
+                            value = policy.Generate(value);
+                            if (accessors[column.PropertyInfoName].CanWrite)
                             {
-                                value = policy.Generate(value);
+                                accessors[column.PropertyInfoName].SetValue(entity, value);
                             }
                         }
 
-                        var setClauses = new SetClausesHolder(column.Name, value, i);
-                        dic[setClauses.Placeholder] = setClauses.Value;
-                        setList.Add(setClauses);
+                        if (maxVersion == null)
+                        {
+                            maxVersion = value;
+                        }
+                        else if (value != null)
+                        {
+                            var list = new List<object>();
+                            list.Add(maxVersion);
+                            list.Add(value);
+                            list.Sort();
+                            maxVersion = list.LastOrDefault();
+                        }
                     }
-
-                    var whereList = new List<SetClausesHolder>();
-                    clausesIndex += 1;
-                    foreach (var column in whereColumns)
-                    {
-                        var value = accessors[column.PropertyInfoName].GetValue(entity);
-                        var whereClauses = new SetClausesHolder(column.Name, value, clausesIndex);
-                        dic[whereClauses.Placeholder] = whereClauses.Value;
-                        whereList.Add(whereClauses);
-                    }
-
-                    // todo 遅すぎるのて temp table を使う
-                    var sql = string.Format("UPDATE {0} SET {1} WHERE {2} ;", table,
-                                string.Join(",", setList.Select(x => x.Clauses)),
-                                string.Join(" AND ", whereList.Select(x => x.Clauses)));
-                    sqlList.Add(sql);
                 }
 
-                var count = await cnn.ExecuteAsync(String.Join(Environment.NewLine, sqlList), dic, transaction, commandTimeout);
-                if (count != items.Length)
+                var vesionCase = versionColumns.Select(x => $"{x.Name} = @p1");
+                var versionUpSql = $"UPDATE {table} SET {string.Join(",", vesionCase)} WHERE EXISTS(SELECT 1 FROM {tempTableName} WHERE {string.Join(" AND ", whereClauses)})";
+                ret = await cnn.ExecuteAsync(versionUpSql, new Dictionary<string, object>() { { "@p1", maxVersion } }, transaction, commandTimeout);
+                if (ret != entities.Count())
                     throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
             }
+
+            // drop temp table
+            await cnn.ExecuteAsync($"DROP TABLE {tempTableName}", null, transaction, commandTimeout);
         }
 
         #endregion
@@ -415,47 +438,37 @@ namespace Dapper.Aggregator
             var columns = type.GetSelectClause().ToArray();
             if (!columns.Any(x => x.IsPrimaryKey))
                 throw new System.Data.MissingPrimaryKeyException("should have a primary key.");
-
-            var whereColumns = columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore).ToArray();
-
-            var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
-            var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
-            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
-
-            var chunkSize = Math.Max(maximumParameterizedCount / whereColumns.Length, 1);
-            foreach (var group in entities.Chunk(chunkSize))
+            if (!columns.All(x =>
+                !String.IsNullOrWhiteSpace(x.Name) &&
+                !String.IsNullOrWhiteSpace(x.DDLType)
+            ))
             {
-                var items = group.ToArray();
-                var dic = new Dictionary<string, object>();
-                var sqlList = new List<string>();
-                for (int i = 0; i < items.Length; i++)
-                {
-                    var entity = items[i];
-                    foreach (var validator in validators)
-                    {
-                        var valdateError = validator.GetError(entity);
-                        if (valdateError != null)
-                        {
-                            throw valdateError;
-                        }
-                    }
-
-                    var whereList = new List<SetClausesHolder>();
-                    foreach (var column in whereColumns)
-                    {
-                        var value = accessors[column.PropertyInfoName].GetValue(entity);
-                        var whereClauses = new SetClausesHolder(column.Name, value, i);
-                        dic[whereClauses.Placeholder] = whereClauses.Value;
-                        whereList.Add(whereClauses);
-                    }
-                    var sql = string.Format("DELETE FROM {0} WHERE {1} ;", table,
-                                string.Join(" AND ", whereList.Select(x => x.Clauses)));
-                    sqlList.Add(sql);
-                }
-                var count = await cnn.ExecuteAsync(String.Join(Environment.NewLine, sqlList), dic, transaction, commandTimeout);
-                if (count != items.Length)
-                    throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+                throw new InvalidOperationException("Add Name and DDLType to the ColumnAttribute.");
             }
+
+            // CREATE TABLE TABLE
+            var tempTableName = $"t_{Guid.NewGuid().ToString().Replace('-', '_').ToLower()}";
+            var ddlColumns = columns.Select(x => toDDLColumn(x));
+            var sb = new StringBuilder();
+            sb.AppendLine($"CREATE TEMP TABLE {tempTableName}(");
+            sb.AppendLine($"{String.Join(",", ddlColumns)}");
+            sb.AppendLine($")");
+            await cnn.ExecuteAsync(sb.ToString(), null, transaction, commandTimeout);
+
+            // BULK INSERT TO TEMP TABLE
+            await BulkInsertRawAsync<T>(cnn, entities, transaction, maximumParameterizedCount, commandTimeout, tempTableName, true);
+
+            // 
+            var whereColumns = columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore).ToArray();
+            var whereClauses = whereColumns.Select(x => $"{table}.{x.Name} = {tempTableName}.{x.Name}");
+
+            var deleteSql = $"DELETE FROM {table} WHERE EXISTS(SELECT 1 FROM {tempTableName} WHERE {string.Join(" AND ", whereClauses)})";
+            var ret = await cnn.ExecuteAsync(deleteSql, null, transaction, commandTimeout);
+            if (ret != entities.Count())
+                throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+
+            // drop temp table
+            await cnn.ExecuteAsync($"DROP TABLE {tempTableName}", null, transaction, commandTimeout);
         }
 
         #endregion
@@ -481,5 +494,9 @@ namespace Dapper.Aggregator
         }
 
         #endregion
+
+        #region 
+        #endregion
+
     }
 }

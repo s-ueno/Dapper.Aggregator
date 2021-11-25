@@ -15,7 +15,7 @@ namespace Dapper.Aggregator.Net6ConsoleApp.Model
         [Column(Name = "name", DDLType = "varchar(50)")]
         public string Name { get; set; }
 
-        [Column(Name = "lockversion", DDLType = "int")]
+        [Column(Name = "lockversion", DDLType = "int", IsVersion = true)]
         public int Lockversion { get; set; }
     }
 }
