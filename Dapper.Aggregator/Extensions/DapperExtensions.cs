@@ -19,6 +19,16 @@ namespace Dapper.Aggregator
     {
         internal static readonly ActivitySource _activitySource = new ActivitySource("Dapper.Aggregator");
 
+        #region FindIdAsync
+
+        async public static Task<T> FindIdAsync<T>(this IDbConnection cnn, IDbTransaction transaction = null, params object[] keys)
+        {
+            var query = new Query<T>().PrimaryKeyFilter(keys);
+            return (await cnn.FindAsync(query, transaction)).FirstOrDefault();
+        }
+
+        #endregion
+
         #region FindAsync
 
         async public static Task<IEnumerable<T>> FindAsync<T>(this IDbConnection cnn, Query<T> query, IDbTransaction transaction = null)
@@ -275,8 +285,14 @@ namespace Dapper.Aggregator
         {
             using var activity = _activitySource.StartActivity("BulkInsertAsync", ActivityKind.Internal);
 
-            if (entities == null || !entities.Any())
+            if (entities == null)
                 throw new ArgumentNullException("entities");
+
+            if (!entities.Any())
+            {
+                activity.AddTag("entities", "no data");
+                return 0;
+            }
 
             var type = typeof(T);
             var table = tableName.EscapeAliasFormat();
@@ -299,7 +315,7 @@ namespace Dapper.Aggregator
                     var entity = items[i];
                     foreach (var validator in validators)
                     {
-                        var validateError = validator.GetError(entity);
+                        var validateError = validator.GetError(entity, PersistState.Insert);
                         if (validateError != null)
                         {
                             throw validateError;
@@ -345,7 +361,77 @@ namespace Dapper.Aggregator
         async public static Task UpdateEntityAsync<T>(this IDbConnection cnn, T entity,
             IDbTransaction transaction = null, int? commandTimeout = null)
         {
-            await BulkUpdateAsync(cnn, new T[] { entity }, transaction, 1, commandTimeout);
+            using var activity = _activitySource.StartActivity("UpdateEntityAsync", ActivityKind.Internal);
+
+            if (entity == null)
+                throw new ArgumentNullException("entity");
+
+            var type = typeof(T);
+            var table = type.GetTableName();
+            var columns = type.GetSelectClause().ToArray();
+            if (!columns.Any(x => x.IsPrimaryKey))
+                throw new System.Data.MissingPrimaryKeyException("should have a primary key.");
+
+            var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
+            foreach (var validator in validators)
+            {
+                var validateError = validator.GetError(entity, PersistState.Update);
+                if (validateError != null)
+                {
+                    throw validateError;
+                }
+            }
+
+            var dic = new Dictionary<string, object>();
+            var index = 0;
+
+            var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
+            var whereColumns = columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore).ToArray();
+            var whereClauses = new List<string>();
+            foreach (var each in whereColumns)
+            {
+                var value = accessors[each.PropertyInfoName].GetValue(entity);
+                var clauses = new SetClausesHolder(each.Name, value, index);
+                dic[clauses.Placeholder] = clauses.Value;
+                whereClauses.Add(clauses.Clauses);
+            }
+
+
+            var versionColumns = columns.Where(x => x.IsVersion).ToArray();
+            var versionPolicy = AttributeUtil.Find<VersionPolicyAttribute>(type);
+            if (!versionPolicy.Any()) versionPolicy = new[] { new DefalutVersionPolicy() };            
+            foreach (var column in versionColumns)
+            {
+                var value = accessors[column.PropertyInfoName].GetValue(entity);
+                foreach (var policy in versionPolicy)
+                {
+                    value = policy.Generate(value);
+                    if (accessors[column.PropertyInfoName].CanWrite)
+                    {
+                        accessors[column.PropertyInfoName].SetValue(entity, value);
+                    }
+                }
+            }
+
+            index += 1;
+            var setColumns = columns.Where(x => !x.IsPrimaryKey && !x.Ignore).ToArray();
+            var setClauses = new List<string>();
+            foreach (var each in setColumns)
+            {
+                var value = accessors[each.PropertyInfoName].GetValue(entity);
+                var clauses = new SetClausesHolder(each.Name, value, index);
+                dic[clauses.Placeholder] = clauses.Value;
+                setClauses.Add(clauses.Clauses);
+            }
+
+            var sql = $"UPDATE {table} SET {string.Join(",", setClauses)} WHERE {String.Join(" AND ", whereClauses)} ;";
+
+            activity.AddTag("Sql", sql);
+
+            var ret = await cnn.ExecuteAsync(sql, dic, transaction, commandTimeout);
+            if (ret != 1)
+                throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+
         }
 
         async public static Task BulkUpdateAsync<T>(this IDbConnection cnn, IEnumerable<T> entities,
@@ -353,8 +439,14 @@ namespace Dapper.Aggregator
         {
             using var activity = _activitySource.StartActivity("BulkUpdateAsync", ActivityKind.Internal);
 
-            if (entities == null || !entities.Any())
-                throw new ArgumentNullException("entity");
+            if (entities == null)
+                throw new ArgumentNullException("entities");
+
+            if (!entities.Any())
+            {
+                activity.AddTag("entities", "no data");
+                return;
+            }
 
             var type = typeof(T);
             var table = type.GetTableName();
@@ -454,7 +546,47 @@ namespace Dapper.Aggregator
         async public static Task DeleteEntityAsync<T>(this IDbConnection cnn, T entity,
             IDbTransaction transaction = null, int? commandTimeout = null)
         {
-            await BulkDeleteAsync(cnn, new T[] { entity }, transaction, 1, commandTimeout);
+            using var activity = _activitySource.StartActivity("DeleteEntityAsync", ActivityKind.Internal);
+
+            if (entity == null)
+                throw new ArgumentNullException("entity");
+
+            var type = typeof(T);
+            var table = type.GetTableName();
+            var columns = type.GetSelectClause().ToArray();
+            if (!columns.Any(x => x.IsPrimaryKey))
+                throw new System.Data.MissingPrimaryKeyException("should have a primary key.");
+
+            var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
+            foreach (var validator in validators)
+            {
+                var validateError = validator.GetError(entity, PersistState.Delete);
+                if (validateError != null)
+                {
+                    throw validateError;
+                }
+            }
+
+            var dic = new Dictionary<string, object>();
+            var accessors = PropertyAccessorImp.ToPropertyAccessors(type).ToDictionary(x => x.Name);
+            var whereColumns = columns.Where(x => (x.IsPrimaryKey || x.IsVersion) && !x.Ignore).ToArray();
+            var whereClauses = new List<string>();
+            foreach (var each in whereColumns)
+            {
+                var value = accessors[each.PropertyInfoName].GetValue(entity);
+                var clauses = new SetClausesHolder(each.Name, value, 0);
+                dic[clauses.Placeholder] = clauses.Value;
+                whereClauses.Add(clauses.Clauses);
+            }
+
+            var sql = $"DELETE FROM {table} WHERE {String.Join(" AND ", whereClauses)} ;";
+
+            activity.AddTag("Sql", sql);
+
+            var ret = await cnn.ExecuteAsync(sql, dic, transaction, commandTimeout);
+            if (ret != 1)
+                throw new System.Data.DBConcurrencyException("entity has already been updated by another user.");
+
         }
 
         async public static Task BulkDeleteAsync<T>(this IDbConnection cnn, IEnumerable<T> entities,
@@ -462,8 +594,14 @@ namespace Dapper.Aggregator
         {
             using var activity = _activitySource.StartActivity("BulkDeleteAsync", ActivityKind.Internal);
 
-            if (entities == null || !entities.Any())
+            if (entities == null)
                 throw new ArgumentNullException("entities");
+
+            if (!entities.Any())
+            {
+                activity.AddTag("entities", "no data");
+                return;
+            }
 
             var type = typeof(T);
             var table = type.GetTableName();
@@ -476,6 +614,19 @@ namespace Dapper.Aggregator
             ))
             {
                 throw new InvalidOperationException("Add Name and DDLType to the ColumnAttribute.");
+            }
+
+            var validators = AttributeUtil.Find<EntityValidateAttribute>(type);
+            foreach (var entity in entities)
+            {
+                foreach (var validator in validators)
+                {
+                    var validateError = validator.GetError(entity, PersistState.Delete);
+                    if (validateError != null)
+                    {
+                        throw validateError;
+                    }
+                }
             }
 
             // CREATE TABLE TABLE
@@ -533,7 +684,17 @@ namespace Dapper.Aggregator
 
         #endregion
 
+        #region Table Lock
 
+        async public static Task TableLock<T>(this IDbConnection cnn, IDbTransaction transaction = null, int? commandTimeout = 30 * 1000)
+        {
+            using var activity = _activitySource.StartActivity("TableLock", ActivityKind.Internal);
+            var type = typeof(T);
+            var table = type.GetTableName().EscapeAliasFormat();
+            await cnn.ExecuteAsync($"LOCK TABLE {table} ;", null, transaction, commandTimeout);
+        }
+
+        #endregion
 
     }
 }

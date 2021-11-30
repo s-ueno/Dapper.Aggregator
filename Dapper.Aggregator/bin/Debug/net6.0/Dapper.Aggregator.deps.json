@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v6.0": {
-      "Dapper.Aggregator/6.0.2": {
+      "Dapper.Aggregator/6.0.4": {
         "dependencies": {
           "Dapper": "2.0.123",
           "System.Reflection.Emit": "4.7.0"
@@ -27,7 +27,7 @@
     }
   },
   "libraries": {
-    "Dapper.Aggregator/6.0.2": {
+    "Dapper.Aggregator/6.0.4": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

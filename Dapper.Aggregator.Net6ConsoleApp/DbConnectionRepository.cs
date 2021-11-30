@@ -78,6 +78,7 @@ namespace Dapper.Aggregator.Net6ConsoleApp
         {
             if (closed) return;
 
+            
             if (Transaction != null)
             {
                 Transaction.Dispose();

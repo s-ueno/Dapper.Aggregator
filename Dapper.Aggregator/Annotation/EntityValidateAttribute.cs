@@ -6,15 +6,22 @@ using System.Threading.Tasks;
 
 namespace Dapper.Aggregator
 {
+    public enum PersistState
+    {
+        Insert,
+        Update,
+        Delete,
+    }
+
     [Serializable]
     public abstract class EntityValidateAttribute : Attribute
     {
-        internal Exception GetError(object entity)
+        internal Exception GetError(object entity, PersistState persistState)
         {
             Exception ret = null;
             try
             {
-                Valid(entity);
+                Valid(entity, persistState);
             }
             catch (Exception ex)
             {
@@ -22,6 +29,6 @@ namespace Dapper.Aggregator
             }
             return ret;
         }
-        public abstract void Valid(object entity);
-    }
+        public abstract void Valid(object entity, PersistState persistState);
+    }   
 }

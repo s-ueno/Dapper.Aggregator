@@ -1,4 +1,5 @@
-﻿using Dapper.Aggregator;
+﻿using Dapper;
+using Dapper.Aggregator;
 using Dapper.Aggregator.Net6ConsoleApp;
 using Dapper.Aggregator.Net6ConsoleApp.Model;
 using Microsoft.Extensions.Configuration;
@@ -21,6 +22,32 @@ var codeList = Enumerable.Range(0, 1000000 /* million */).Select(i =>
         Name = $"Name - {i}",
         Lockversion = 0
     };
+});
+
+await TransAction(async (sqlMapper, transaction) => {
+
+    var rows = await sqlMapper.QueryAsync("select * from code_table limit 100 ", transaction);
+    var json = System.Text.Json.JsonSerializer.Serialize(rows);
+    foreach (var each in rows)
+    {
+        Console.WriteLine(each["cd"]);
+    }
+
+});
+
+await TransAction(async (sqlMapper, transaction) =>
+{
+    var row = await sqlMapper.FindIdAsync<CodeTable>(keys: 0.ToString().PadLeft(10, '0'));
+    row.Name = "AAA";
+
+    Console.WriteLine($"Lockversion:{row.Lockversion}");
+    await sqlMapper.UpdateEntityAsync(row);
+    Console.WriteLine($"Lockversion:{row.Lockversion}");
+
+    await sqlMapper.DeleteEntityAsync(row);
+
+    await sqlMapper.TableLock<CodeTable>();
+
 });
 
 

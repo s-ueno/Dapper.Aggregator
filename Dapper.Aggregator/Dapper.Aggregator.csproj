@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net6.0</TargetFramework>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <Version>6.0.2</Version>
+    <Version>6.0.4</Version>
     <Description>Type-safe Dapper built with "Criteria Pattern"</Description>
     <Copyright></Copyright>
     <Authors>uEN</Authors>
@@ -12,10 +12,10 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/s-ueno/Dapper.Aggregator</PackageProjectUrl>
     <RepositoryUrl>https://github.com/s-ueno/Dapper.Aggregator</RepositoryUrl>
-    <PackageTags>dapper orm</PackageTags>
+    <PackageTags>dapper orm bulkUpdate bulkInsert bulkDelete</PackageTags>
     <PackageReleaseNotes>.Net 6</PackageReleaseNotes>
-    <AssemblyVersion>6.0.2</AssemblyVersion>
-    <FileVersion>6.0.2.*</FileVersion>
+    <AssemblyVersion>6.0.4</AssemblyVersion>
+    <FileVersion>6.0.4.*</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
