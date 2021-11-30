@@ -334,6 +334,10 @@ namespace Dapper.Aggregator
                             foreach (var policy in versionPolicy)
                             {
                                 value = policy.Generate(value);
+                                if (accessors[column.PropertyInfoName].CanWrite)
+                                {
+                                    accessors[column.PropertyInfoName].SetValue(entity, value);
+                                }
                             }
                         }
 
